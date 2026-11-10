@@ -48,7 +48,7 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
   const c = settings.screener;
 
   const stockHead = [
-    'Rank', 'Symbol', 'Sector', 'LTP', '1D %', '1W %', '1M %', 'Signal', 'Setup', 'Score', 'Conviction', 'Entry', 'Stop loss', 'Target 1', 'Target 2',
+    'Rank', 'Symbol', 'Sector', 'LTP', '1D %', '1W %', '1M %', 'Signal', 'Setup', 'Score', 'Conviction', 'Entry', 'Stop loss', 'Target 1', 'Target 2', 'Risk %', 'R : R',
     'Open', 'High', 'Low', 'Prev close', 'Volume', 'Value (Cr)', 'Lot size', 'Vol spike (x)', 'RSI 14', 'ADX 14', 'ATR 14', 'EMA 20', 'EMA 50', 'EMA 200', 'MACD', 'MACD signal',
     '52W high', '52W low', 'From 52W high %', 'From 52W low %', 'Trend',
   ];
@@ -58,6 +58,7 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
         n(i + 1, '0', { align: 'center', textColor: '#64748b' }), { value: r.s, fontWeight: 'bold' }, text(r.sec), n(r.ltp, '#,##0.00', { fontWeight: 'bold' }), changeCell(r.chg), changeCell(r.chg1w), changeCell(r.chg1m),
         sideCell(r), text(r.setup || ''), scoreCell(r.score), text(convictionLabel(r.score, r.side), { align: 'center', fontWeight: 'bold' }),
         n(r.plan?.entry, '#,##0.00'), n(r.plan?.stop, '#,##0.00', { textColor: '#b91c1c' }), n(r.plan?.t1, '#,##0.00', { textColor: '#15803d' }), n(r.plan?.t2, '#,##0.00', { textColor: '#15803d' }),
+        n(r.plan?.riskPct, '0.00'), text(r.plan ? `1 : ${r.plan.rr1} / 1 : ${r.plan.rr2}` : '', { align: 'center' }),
         n(r.open, '#,##0.00'), n(r.high, '#,##0.00'), n(r.low, '#,##0.00'), n(r.prevClose, '#,##0.00'),
         n(r.volume, '#,##0'), n(r.valueCr, '#,##0.00'), n(r.lot, '#,##0'), n(r.volSpike, '0.00', r.volOk ? { fontWeight: 'bold', textColor: '#1d4ed8' } : undefined), rsiCell(r.rsi), n(r.adx, '0.0'), n(r.atr, '0.00'),
         n(r.ema20, '#,##0.00'), n(r.ema50, '#,##0.00'), n(r.ema200, '#,##0.00'), n(r.macd, '0.000'), n(r.macdSig, '0.000'),
@@ -67,7 +68,7 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
     );
   const stockCols = [
     { width: 6 }, { width: 15 }, { width: 24 }, { width: 12 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 11 }, { width: 21 }, { width: 8 }, { width: 12 },
-    { width: 11 }, { width: 11 }, { width: 11 }, { width: 11 },
+    { width: 11 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 9 }, { width: 14 },
     { width: 11 }, { width: 11 }, { width: 11 }, { width: 11 },
     { width: 14 }, { width: 11 }, { width: 10 }, { width: 10 }, { width: 8 }, { width: 8 }, { width: 9 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 10 }, { width: 10 },
     { width: 11 }, { width: 11 }, { width: 12 }, { width: 12 }, { width: 12 },
@@ -293,10 +294,10 @@ export async function exportPdf({ rows, indices, sectors, breadth, meta, setting
     doc.text(title, 36, 44);
     autoTable(doc, {
       startY: 54,
-      head: [['#', 'Symbol', 'Sector', 'LTP', '1D %', 'Vol x', 'RSI', 'ADX', 'Setup', 'Score', 'Entry', 'Stop loss', 'Target 1', 'Target 2']],
+      head: [['#', 'Symbol', 'Sector', 'LTP', '1D %', 'Vol x', 'RSI', 'Setup', 'Score', 'Conviction', 'Entry', 'Stop loss', 'Target 1', 'Target 2', 'Lot']],
       body: list.slice(0, 25).map((r, i) => [
-        i + 1, r.s, r.sec, price(r.ltp), pct(r.chg), mult(r.volSpike), dec(r.rsi), dec(r.adx, 0), r.setup || '', r.score,
-        price(r.plan?.entry), price(r.plan?.stop), price(r.plan?.t1), price(r.plan?.t2),
+        i + 1, r.s, r.sec, price(r.ltp), pct(r.chg), mult(r.volSpike), dec(r.rsi, 0), r.setup || '', r.score, convictionLabel(r.score, r.side),
+        price(r.plan?.entry), price(r.plan?.stop), price(r.plan?.t1), price(r.plan?.t2), r.lot ? String(r.lot) : '-',
       ]),
       styles: { fontSize: 8, cellPadding: 3 },
       headStyles: { fillColor: fill, textColor: 255 },
@@ -326,6 +327,67 @@ export async function exportPdf({ rows, indices, sectors, breadth, meta, setting
     didParseCell: (d) => colorChange(d, [3, 4, 5]),
     margin: { left: 36, right: 36 },
   });
+
+  const genericPage = (title, headRow, body, fill, colorCols) => {
+    doc.addPage();
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(30, 41, 59);
+    doc.text(title, 36, 44);
+    autoTable(doc, {
+      startY: 54,
+      head: [headRow],
+      body: body.length ? body : [['No stock matches.']],
+      styles: { fontSize: 8, cellPadding: 3 },
+      headStyles: { fillColor: fill, textColor: 255 },
+      didParseCell: (d) => colorChange(d, colorCols),
+      margin: { left: 36, right: 36 },
+    });
+  };
+
+  const byMonth = [...rows].filter((r) => Number.isFinite(r.chg1m)).sort((a, b) => b.chg1m - a.chg1m);
+  const momentumRow = (r, i) => [i + 1, r.s, r.sec, price(r.ltp), pct(r.chg), pct(r.chg1w, 1), weeklyLabel(r.chg1w), pct(r.chg1m, 1), monthlyLabel(r.chg1m), mult(r.volSpike), r.value ?? ''];
+  const momHead = ['#', 'Symbol', 'Sector', 'LTP', '1D %', '1W %', 'Weekly status', '1M %', 'Monthly status', 'Vol x', ''];
+  genericPage(
+    'Momentum leaders (best 1-month return)',
+    momHead.slice(0, 10),
+    byMonth.slice(0, 20).map((r, i) => momentumRow(r, i).slice(0, 10)),
+    accent,
+    [4, 5, 7],
+  );
+  genericPage(
+    'Momentum laggards (weakest 1-month return)',
+    momHead.slice(0, 10),
+    byMonth.slice(-20).reverse().map((r, i) => momentumRow(r, i).slice(0, 10)),
+    red,
+    [4, 5, 7],
+  );
+
+  const bo = [...rows].filter((r) => breakoutLabel(r)).sort((a, b) => (b.distHi ?? -999) - (a.distHi ?? -999));
+  genericPage(
+    '52-week breakouts and breakdowns (within 2% of the high or low)',
+    ['Symbol', 'Sector', 'LTP', '1D %', '52W high', 'From high', '52W low', 'From low', 'Vol x', 'Status'],
+    bo.map((r) => [r.s, r.sec, price(r.ltp), pct(r.chg), price(r.hi52), pct(r.distHi), price(r.lo52), pct(r.distLo), mult(r.volSpike), breakoutLabel(r)]),
+    accent,
+    [3],
+  );
+
+  const hasLot = rows.filter((r) => r.lot).length;
+  doc.addPage();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(30, 41, 59);
+  doc.text('About this report', 36, 44);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  const about = [
+    `Data: ${meta.source}. Data date ${meta.lastTradingDate}, generated ${meta.generatedAtIST}.`,
+    `Universe: ${rows.length} F&O stocks. Lot sizes are shown for ${hasLot} of them (copied from a client sheet dated 8-Nov-2026; NSE revises them).`,
+    'Score (0-100): EMA trend 25, RSI 20, ADX 20, volume spike 15, closeness to the 52-week extreme 10, MACD 10.',
+    'Conviction: score 85+ VERY HIGH, 70+ HIGH, otherwise MEDIUM. Stop loss = ATR x multiplier; targets are multiples of that risk.',
+    'Not included because no free reliable source exists: intraday VWAP, live option chain, option premiums, futures basis and open interest, PCR and max pain.',
+  ];
+  doc.text(doc.splitTextToSize(about.join('\n\n'), W - 72), 36, 68);
 
   const pages = doc.getNumberOfPages();
   for (let p = 1; p <= pages; p++) {
