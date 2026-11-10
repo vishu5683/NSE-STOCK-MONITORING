@@ -1,0 +1,11 @@
+{
+  "name": "NSE Stocks Pro",
+  "short_name": "NSE Stocks",
+  "description": "NSE F&O stock screener and market dashboard",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a1020",
+  "theme_color": "#0a1020",
+  "icons": [{ "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

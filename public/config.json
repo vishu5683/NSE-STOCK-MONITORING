@@ -1,0 +1,19 @@
+{
+  "clientName": "NSE Stocks Pro",
+  "tagline": "F&O stock screener and market dashboard",
+  "accent": "#4f8cff",
+  "disclaimer": "Rule-based research output for information only. It is not investment advice or a recommendation to buy or sell. Data is delayed and may contain errors. Verify prices with your broker before trading.",
+  "screener": {
+    "minScore": 60,
+    "volSpike": 1.25,
+    "bullRsi": 53,
+    "bearRsi": 47,
+    "adx": 18,
+    "atrMult": 1.5,
+    "rr1": 2,
+    "rr2": 3,
+    "requireVolume": false
+  },
+  "hidden": [],
+  "watchlist": []
+}

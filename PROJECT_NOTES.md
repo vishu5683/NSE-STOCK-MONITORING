@@ -1,0 +1,114 @@
+# NSE Stocks Pro: project notes (keep this for new chats)
+
+Personal project, built as a first freelance deliverable. Folder: `Documents\Stock and Exchange Projects\nsestocks`.
+**Not part of the TCI Freight repos.** Nothing from this project was added there.
+
+Start a new chat with: "Read PROJECT_NOTES.md in this folder, then continue." (Claude Code also reads `CLAUDE.md`.)
+
+## 1. Goal
+A client-ready stock dashboard like the "Professional F&O Excel Screener" PDF (setups, index scanner, heatmap, futures/OI, PCR), but:
+- everything free (hosting, data, tools), no monthly Rs 500-1000 cost
+- deployable on GitHub Pages or Vercel and shareable with a client
+- dashboard + Excel + PDF + admin panel
+- data that is real. The PDF showed 0.00% change on every stock, volume spikes of 0.01x, and constant PCR/OI. Those were stale or fallback values, so they were NOT copied.
+
+## 2. Status (10-Nov-2026, v1.1)
+Built and tested. Not pushed anywhere yet (no GitHub repo created, no commit made; only `git init`).
+
+Verified in headless Edge:
+- production build passes (`npm run build`)
+- dashboard, screener, sectors, reports, admin all render, no console errors
+- 259/259 stocks and 4 indices load from Yahoo; all 5 health checks pass
+- Excel (7 sheets), PDF (5 pages) and CSV download; the Excel file opens in openpyxl with fills, freeze panes and merged title
+- admin: login, presets, live preview count, validation blocks Save, saving changes the screener result
+- mobile 390px and 360px: no horizontal overflow on any tab, bottom nav fixed, stock sheet opens
+
+Not verified: the GitHub Actions workflow (data refresh, failure issue, Pages deploy) has not run because there is no GitHub repo yet. Vercel deploy not tried. Safari/Firefox and a real phone not tested. Excel was checked with openpyxl, not opened in Microsoft Excel.
+
+### What v1.1 added
+- **Mobile:** app-style bottom navigation with icons, data-freshness line under the header, stock details as a bottom sheet, 2-column heatmap, bigger touch targets. On phones the screener shows Symbol, LTP, 1D % and a score bar coloured by signal (green bullish, red bearish, grey none).
+- **Monitoring:** `fetch_data.py` runs 5 health checks (symbols loaded, prices moving, data date recent, indices loaded, volume present) and writes them to `meta.health`. If more than half the stocks show 0.00% change it refuses to publish (the bug in the client's old PDF). Failed checks show as a banner on the site and in Admin > Data health. The workflow opens a GitHub issue when a refresh fails (GitHub emails the owner) and closes it when the refresh works again.
+- **Freshness:** 3 refreshes per weekday (11:15, 13:30, 16:00 IST). The open page re-checks the data file every 10 minutes. On a weekday with no candle for today the phase reads "NO SESSION TODAY - holiday or feed delay".
+- **Excel design:** navy title band, styled headers, zebra rows, grid lines, coloured Signal and Score cells, +/- colours on changes, RSI and volume highlights, frozen header and symbol column, Top 5 tables on the Summary sheet, and a Guide sheet that explains every column.
+- **Parameters:** Conservative / Balanced / Aggressive presets, live "with these rules: N bullish, M bearish" preview before saving, validation (for example bullish RSI must be above bearish RSI, Target 2 beyond Target 1).
+- **Hardening:** error boundary (a crash shows a reload card, not a blank page), web app manifest (Add to Home Screen), `noindex` so search engines do not list a client's private dashboard.
+
+### Known gaps
+- 10-Nov-2026 returned no candle (last session 9-Nov) when fetched at 15:27 and 15:46 IST. Probably an exchange holiday (Diwali Balipratipada); not confirmed. If a normal trading day ever shows yesterday's date after 16:00 IST, Yahoo is late and the 16:00 run will publish old data.
+- The 96-hour stale banner will not fire for a single missed day. The health check "Data date is recent" allows 4 days because of weekends and holidays.
+
+## 3. Stack and structure
+```
+nsestocks/
+  data-pipeline/
+    universe.csv          259 symbols + sector (from the PDF)
+    fetch_data.py         Yahoo Finance -> indicators -> public/data/latest.json
+    requirements.txt
+  public/
+    config.json           default branding + thresholds (edit and redeploy)
+    data/latest.json      generated data (committed by the workflow)
+  src/
+    App.jsx               layout, routing (#/dashboard ...), data load
+    lib/signals.js        scoring and setup rules, breadth, sectors
+    lib/exporters.js      Excel (write-excel-file), PDF (jsPDF + autotable), CSV
+    lib/auth.js           admin password gate
+    lib/settings.js       config.json + localStorage overlay
+    components/           Dashboard, Screener, StockModal, Reports, Admin, Charts, ui
+  .github/workflows/update-data-and-deploy.yml
+  vercel.json
+```
+No backend. The browser loads `data/latest.json` and does all scoring, filtering and file generation itself.
+
+## 4. Data
+- Source: Yahoo Finance via `yfinance`, tickers `SYMBOL.NS`, indices `^NSEI ^NSEBANK ^BSESN ^INDIAVIX`. Free, no key, delayed (about 15 min), **unofficial**. Fine for a screener, not for order execution.
+- The script exits with an error and keeps the old file if fewer than 70% of symbols load.
+- Volume spike compares the last **completed** session with its 20-day average (a still-forming bar has partial volume).
+- Daily candles only. No intraday VWAP, no live option chain, no futures OI (no free reliable source).
+- Refresh: GitHub Actions at 11:15, 13:30 and 16:00 IST on weekdays, plus a manual "Run workflow" button. GitHub can start scheduled runs 10-30 minutes late, and pauses schedules after 60 days without repo activity.
+- Lot sizes were left out on purpose. They change by NSE circular and options are not available.
+
+Other free sources if needed later: NSE F&O UDiFF bhavcopy (end-of-day OI, free, format changed again from 6-Jul-2026), broker APIs (Upstox, Fyers, Angel One SmartAPI are free with an account and give live data and option chain; Zerodha's data API is paid), unofficial NSE website JSON (nsepython) which breaks often and blocks cloud IPs.
+
+## 5. Rules (defaults, editable in Admin)
+- Min score 60, volume spike 1.25x, bull RSI >= 53, bear RSI <= 47, ADX >= 18
+- Bullish setup also needs price > EMA20 > EMA50 (mirror for bearish)
+- Score 0-100: EMA trend 25, RSI 20, ADX 20, volume 15, near 52W extreme 10, MACD 10
+- Stop loss = 1.5 x ATR, Target 1 = 2R, Target 2 = 3R (mechanical levels, not advice)
+- "Require volume" toggle makes setups stricter (off by default)
+
+## 6. Admin panel
+- Password: `ADMIN#@1234` (in `src/lib/auth.js`). 5 wrong tries lock it for 30 seconds.
+- **This is not real security.** The password is inside the JavaScript sent to every visitor. It only keeps casual visitors out of the settings screen. Never put secrets or private client data behind it. For real protection add a serverless function or Cloudflare Access.
+- Settings saved in the admin panel live in that browser (localStorage). To make them the default for everyone: Admin > Export settings > paste into `public/config.json` > push.
+
+## 7. Deploy checklist (free)
+1. `git init -b main`, create an empty GitHub repo, push.
+2. GitHub Pages: Settings > Pages > Source = GitHub Actions. Run "Update data and deploy". Site appears at `https://<user>.github.io/<repo>/`.
+3. Vercel (optional second host): import the repo, no settings needed. Redeploys on every data commit.
+4. For the client: change name and colours in Admin, export, paste into `public/config.json`, push. Optional: custom domain (domain itself costs money; the subdomain is free).
+5. A private GitHub repo works with Pages only on paid plans. For free, use a public repo, or use Vercel (free, works with private repos).
+
+## 8. Things to tell the client / check before selling
+- Data is delayed and unofficial; say so (the footer and PDF already do).
+- Selling or sharing buy/sell signals with the public can fall under SEBI research analyst / investment adviser rules in India. Check this before charging for signals. This is a flag, not legal advice.
+- Yahoo Finance terms limit commercial redistribution. If the client wants paid/commercial use, move to a licensed source (NSE data, or a broker/vendor feed).
+
+## 9. Ideas for next versions
+- Real option chain, PCR and max pain through a broker API (Upstox/Fyers) in a small serverless function
+- Intraday candles (5 min) for VWAP and 9/15 EMA, via a broker API
+- Alerts to Telegram when a stock becomes a setup (GitHub Actions + Telegram bot, free)
+- Watchlist sync across devices (needs a free DB such as Supabase)
+- Backtest page: how setups performed over the last year
+- Real login (Supabase auth or Cloudflare Access)
+
+## 10. Commands
+```
+npm install
+pip install -r data-pipeline/requirements.txt
+npm run data       # refresh public/data/latest.json
+npm run dev        # local dev server
+npm run build      # production build into dist/
+```
+
+## 11. Cost
+Rs 0. GitHub Pages / Vercel free tiers, GitHub Actions free minutes (each run is about 2 minutes), Yahoo data free. A custom domain is the only optional cost.
