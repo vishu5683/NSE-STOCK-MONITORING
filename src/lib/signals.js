@@ -155,3 +155,37 @@ export function sectorStats(rows) {
     }))
     .sort((a, b) => b.chg - a.chg);
 }
+
+// Status labels (same bands as the client's heatmap sheet).
+export function weeklyLabel(v) {
+  if (!has(v)) return '-';
+  if (v >= 7) return '+7% RALLY';
+  if (v >= 3) return 'BULLISH TREND';
+  if (v >= 0) return 'MILD UP';
+  if (v > -3) return 'MILD DOWN';
+  if (v > -7) return 'BEARISH TREND';
+  return 'SHARP DROP';
+}
+
+export function monthlyLabel(v) {
+  if (!has(v)) return '-';
+  if (v >= 15) return 'MEGATREND (+15%)';
+  if (v >= 7) return 'STRONG RUN';
+  if (v >= 0) return 'ACCUMULATION';
+  if (v > -7) return 'DISTRIBUTION';
+  if (v > -15) return 'HEAVY DROP';
+  return 'DRAWDOWN (-15%)';
+}
+
+export function convictionLabel(score, side) {
+  if (!side) return '-';
+  return score >= 85 ? 'VERY HIGH' : score >= 70 ? 'HIGH' : 'MEDIUM';
+}
+
+export function breakoutLabel(r) {
+  if (has(r.distHi) && r.distHi >= -0.5) return '52W BREAKOUT';
+  if (has(r.distHi) && r.distHi >= -2) return 'NEAR 52W HIGH';
+  if (has(r.distLo) && r.distLo <= 0.5) return '52W BREAKDOWN';
+  if (has(r.distLo) && r.distLo <= 2) return 'NEAR 52W LOW';
+  return '';
+}

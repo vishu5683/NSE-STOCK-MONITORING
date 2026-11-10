@@ -112,3 +112,13 @@ npm run build      # production build into dist/
 
 ## 11. Cost
 Rs 0. GitHub Pages / Vercel free tiers, GitHub Actions free minutes (each run is about 2 minutes), Yahoo data free. A custom domain is the only optional cost.
+
+## 12. Comparison with the client's PDF (checked 10-Nov-2026)
+The PDF (header date 08-11-2026, a Sunday) is really the **6-Nov-2026 close**. Our pipeline run on the same 6-Nov data, 7 stocks:
+- LTP and 52W high: exact match (one 52W-high difference: ICICIBANK, PDF 1575.9 vs ours 1571.2).
+- RSI: within 0.5 points. ADX: within 3 points. EMA 20/50: within about 1%. EMA 200: up to 2.5% apart. ATR: PDF about 5% lower.
+- The gaps are method differences (we use Wilder ATR/ADX and EMAs seeded on 2 years of history). Ours are the standard textbook versions.
+- Not in the PDF but we have: health checks, rule presets, mobile layout, Guide sheet.
+- In the PDF but NOT here, on purpose (no free reliable source): intraday VWAP and 9/15 EMA signals, index option scanner with premiums, option strike (ATM) column, futures price/basis/OI, PCR, call/put OI support and resistance, max pain.
+- Added after the comparison (v1.2): Rank, Conviction, Open/High/Low/Prev close, Value (Cr), Lot size, weekly and monthly status labels, 52-week breakout status, new Excel sheets Momentum and Breakouts.
+- Lot sizes in `data-pipeline/lot_sizes.csv` were copied from the PDF. NSE revises them, so refresh before any real use.

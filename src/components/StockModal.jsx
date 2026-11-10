@@ -2,6 +2,7 @@ import React from 'react';
 import { Modal, Change, SideBadge, ScoreBar } from './ui.jsx';
 import { PriceChart, RangeBar } from './Charts.jsx';
 import { price, dec, mult, int } from '../lib/fmt.js';
+import { weeklyLabel, monthlyLabel, breakoutLabel } from '../lib/signals.js';
 
 const Stat = ({ label, children }) => (
   <div className="stat">
@@ -48,6 +49,16 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
         <Stat label="1W / 1M">
           <Change value={s.chg1w} /> / <Change value={s.chg1m} />
         </Stat>
+        <Stat label="Weekly / monthly status">
+          {weeklyLabel(s.chg1w)} · {monthlyLabel(s.chg1m)}
+        </Stat>
+        <Stat label="Open / High / Low">
+          {price(s.open)} / {price(s.high)} / {price(s.low)}
+        </Stat>
+        <Stat label="Prev close">{price(s.prevClose)}</Stat>
+        <Stat label="Value traded">₹{dec(s.valueCr, 1)} Cr</Stat>
+        <Stat label="Lot size">{s.lot ? int(s.lot) : '-'}</Stat>
+        {breakoutLabel(s) && <Stat label="52-week status">{breakoutLabel(s)}</Stat>}
         <Stat label="RSI 14">{dec(s.rsi)}</Stat>
         <Stat label="ADX 14">{dec(s.adx)}</Stat>
         <Stat label="ATR 14">{price(s.atr)}</Stat>

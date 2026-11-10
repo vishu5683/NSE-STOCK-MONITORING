@@ -176,7 +176,13 @@ def build_row(df: pd.DataFrame, forming: bool) -> dict | None:
     else:
         trend = "SIDEWAYS"
 
+    vi = -2 if forming else -1
     return {
+        "open": num(df["Open"].iloc[-1]),
+        "high": num(h.iloc[-1]),
+        "low": num(l.iloc[-1]),
+        "prevClose": num(prev),
+        "valueCr": num(float(c.iloc[vi]) * float(v.iloc[vi]) / 1e7),
         "ltp": num(last),
         "chg": num((last / prev - 1) * 100),
         "chg1w": num(pct(5)),
@@ -213,6 +219,10 @@ def main() -> int:
 
     uni = pd.read_csv(HERE / "universe.csv")
     uni["symbol"] = uni["symbol"].str.strip()
+    lots = {}
+    lot_file = HERE / "lot_sizes.csv"
+    if lot_file.exists():
+        lots = {r.symbol: int(r.lot) for r in pd.read_csv(lot_file).itertuples()}
     now = datetime.now(IST)
 
     print(f"Downloading {len(uni)} stocks + {len(INDICES)} indices ...")
@@ -245,7 +255,7 @@ def main() -> int:
         if (ref_date - df.index[-1].date()).days > 7:
             failed.append(row["symbol"])
             continue
-        stocks.append({"s": row["symbol"], "sec": row["sector"], **built})
+        stocks.append({"s": row["symbol"], "sec": row["sector"], "lot": lots.get(row["symbol"]), **built})
 
     indices = []
     for name, ysym in INDICES:
@@ -287,6 +297,7 @@ def main() -> int:
             "notes": [
                 "Volume spike compares the last completed session with its 20-day average.",
                 "Daily timeframe only. No intraday VWAP and no live option chain in the free data.",
+                "Lot sizes come from lot_sizes.csv (copied from the client sheet of 8-Nov-2026). NSE revises lot sizes, so verify before trading.",
                 "Screener output is rule-based research, not investment advice.",
             ],
         },

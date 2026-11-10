@@ -1,4 +1,5 @@
 import { price, pct, dec, mult } from './fmt.js';
+import { weeklyLabel, monthlyLabel, convictionLabel, breakoutLabel } from './signals.js';
 
 function download(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -47,26 +48,28 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
   const c = settings.screener;
 
   const stockHead = [
-    'Symbol', 'Sector', 'LTP', '1D %', '1W %', '1M %', 'Signal', 'Setup', 'Score', 'Entry', 'Stop loss', 'Target 1', 'Target 2',
-    'Volume', 'Vol spike (x)', 'RSI 14', 'ADX 14', 'ATR 14', 'EMA 20', 'EMA 50', 'EMA 200', 'MACD', 'MACD signal',
+    'Rank', 'Symbol', 'Sector', 'LTP', '1D %', '1W %', '1M %', 'Signal', 'Setup', 'Score', 'Conviction', 'Entry', 'Stop loss', 'Target 1', 'Target 2',
+    'Open', 'High', 'Low', 'Prev close', 'Volume', 'Value (Cr)', 'Lot size', 'Vol spike (x)', 'RSI 14', 'ADX 14', 'ATR 14', 'EMA 20', 'EMA 50', 'EMA 200', 'MACD', 'MACD signal',
     '52W high', '52W low', 'From 52W high %', 'From 52W low %', 'Trend',
   ];
   const stockRow = (r, i) =>
     styleRow(
       [
-        { value: r.s, fontWeight: 'bold' }, text(r.sec), n(r.ltp, '#,##0.00', { fontWeight: 'bold' }), changeCell(r.chg), changeCell(r.chg1w), changeCell(r.chg1m),
-        sideCell(r), text(r.setup || ''), scoreCell(r.score),
+        n(i + 1, '0', { align: 'center', textColor: '#64748b' }), { value: r.s, fontWeight: 'bold' }, text(r.sec), n(r.ltp, '#,##0.00', { fontWeight: 'bold' }), changeCell(r.chg), changeCell(r.chg1w), changeCell(r.chg1m),
+        sideCell(r), text(r.setup || ''), scoreCell(r.score), text(convictionLabel(r.score, r.side), { align: 'center', fontWeight: 'bold' }),
         n(r.plan?.entry, '#,##0.00'), n(r.plan?.stop, '#,##0.00', { textColor: '#b91c1c' }), n(r.plan?.t1, '#,##0.00', { textColor: '#15803d' }), n(r.plan?.t2, '#,##0.00', { textColor: '#15803d' }),
-        n(r.volume, '#,##0'), n(r.volSpike, '0.00', r.volOk ? { fontWeight: 'bold', textColor: '#1d4ed8' } : undefined), rsiCell(r.rsi), n(r.adx, '0.0'), n(r.atr, '0.00'),
+        n(r.open, '#,##0.00'), n(r.high, '#,##0.00'), n(r.low, '#,##0.00'), n(r.prevClose, '#,##0.00'),
+        n(r.volume, '#,##0'), n(r.valueCr, '#,##0.00'), n(r.lot, '#,##0'), n(r.volSpike, '0.00', r.volOk ? { fontWeight: 'bold', textColor: '#1d4ed8' } : undefined), rsiCell(r.rsi), n(r.adx, '0.0'), n(r.atr, '0.00'),
         n(r.ema20, '#,##0.00'), n(r.ema50, '#,##0.00'), n(r.ema200, '#,##0.00'), n(r.macd, '0.000'), n(r.macdSig, '0.000'),
         n(r.hi52, '#,##0.00'), n(r.lo52, '#,##0.00'), n(r.distHi, '0.00'), n(r.distLo, '0.00'), text(r.trend),
       ],
       i,
     );
   const stockCols = [
-    { width: 15 }, { width: 24 }, { width: 12 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 11 }, { width: 21 }, { width: 8 },
+    { width: 6 }, { width: 15 }, { width: 24 }, { width: 12 }, { width: 9 }, { width: 9 }, { width: 9 }, { width: 11 }, { width: 21 }, { width: 8 }, { width: 12 },
     { width: 11 }, { width: 11 }, { width: 11 }, { width: 11 },
-    { width: 14 }, { width: 10 }, { width: 8 }, { width: 8 }, { width: 9 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 10 }, { width: 10 },
+    { width: 11 }, { width: 11 }, { width: 11 }, { width: 11 },
+    { width: 14 }, { width: 11 }, { width: 10 }, { width: 10 }, { width: 8 }, { width: 8 }, { width: 9 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 10 }, { width: 10 },
     { width: 11 }, { width: 11 }, { width: 12 }, { width: 12 }, { width: 12 },
   ];
   const stockSheet = (name, list) => ({
@@ -74,7 +77,7 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
     data: [head(stockHead), ...(list.length ? list.map(stockRow) : [[text('No stocks match the current settings.')]])],
     columns: stockCols,
     stickyRowsCount: 1,
-    stickyColumnsCount: 1,
+    stickyColumnsCount: 2,
   });
 
   const bull = rows.filter((r) => r.side === 'BULL').sort((x, y) => y.score - x.score);
@@ -134,6 +137,34 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
     ].map(([k, v], i) => kv(k, v, i)),
   ];
 
+  const momentum = [
+    head(['Symbol', 'Sector', 'LTP', 'Today %', 'Weekly %', 'Weekly status', 'Monthly %', 'Monthly status', 'Vol spike (x)', 'Breakout status', 'Signal']),
+    ...[...rows].sort((x, y) => (y.chg1m ?? -999) - (x.chg1m ?? -999)).map((r, i) =>
+      styleRow(
+        [
+          { value: r.s, fontWeight: 'bold' }, text(r.sec), n(r.ltp, '#,##0.00'), changeCell(r.chg), changeCell(r.chg1w), text(weeklyLabel(r.chg1w), { align: 'center' }),
+          changeCell(r.chg1m), text(monthlyLabel(r.chg1m), { align: 'center' }), n(r.volSpike, '0.00'), text(breakoutLabel(r), { align: 'center', fontWeight: 'bold' }), sideCell(r),
+        ],
+        i,
+      ),
+    ),
+  ];
+  const breakoutRows = [...rows].filter((r) => breakoutLabel(r)).sort((x, y) => (y.distHi ?? -999) - (x.distHi ?? -999));
+  const breakouts = [
+    head(['Symbol', 'Sector', 'LTP', 'Today %', '52W high', 'From 52W high %', '52W low', 'From 52W low %', 'Vol spike (x)', 'Status', 'Signal']),
+    ...(breakoutRows.length
+      ? breakoutRows.map((r, i) =>
+          styleRow(
+            [
+              { value: r.s, fontWeight: 'bold' }, text(r.sec), n(r.ltp, '#,##0.00'), changeCell(r.chg), n(r.hi52, '#,##0.00'), n(r.distHi, '0.00'), n(r.lo52, '#,##0.00'), n(r.distLo, '0.00'),
+              n(r.volSpike, '0.00'), text(breakoutLabel(r), { align: 'center', fontWeight: 'bold' }), sideCell(r),
+            ],
+            i,
+          ),
+        )
+      : [[text('No stock is within 2% of its 52-week high or low.')]]),
+  ];
+
   const guide = [
     head(['Column', 'What it means']),
     ...[
@@ -141,6 +172,11 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
       ['Setup', 'BREAKOUT/BREAKDOWN + VOLUME = at the 52-week extreme with a volume spike. TREND + MOMENTUM = trend rules met away from the extreme.'],
       ['Score', '0 to 100. EMA trend 25, RSI zone 20, ADX strength 20, volume 15, near 52-week extreme 10, MACD 10. Green = 75+, blue = 60+.'],
       ['Entry / Stop loss / Targets', 'Mechanical levels. Stop = ATR x multiplier from entry. Target 1 and 2 = risk x the multipliers in Settings.'],
+      ['Rank / Conviction', 'Rank is the position by score inside the sheet. Conviction: score 85+ VERY HIGH, 70+ HIGH, otherwise MEDIUM.'],
+      ['Open / High / Low / Prev close / Value (Cr)', 'Last session prices. Value = last price x volume, in crores (approximate turnover).'],
+      ['Lot size', 'Copied from the client sheet of 8-Nov-2026. NSE revises lot sizes, verify before trading.'],
+      ['Weekly / Monthly status', 'Labels on the 1-week and 1-month return: RALLY, TREND, MILD, DROP, MEGATREND, ACCUMULATION, DISTRIBUTION, DRAWDOWN.'],
+      ['Breakout status', '52W BREAKOUT = within 0.5% of the 52-week high or above it. NEAR = within 2%. Same idea for BREAKDOWN at the low.'],
       ['Vol spike (x)', 'Last completed session volume divided by the 20-day average. Blue = at or above the threshold.'],
       ['RSI 14', 'Momentum, 0 to 100. Orange = 70 or more (stretched up). Purple = 30 or less (stretched down).'],
       ['ADX 14', 'Trend strength. Higher means a stronger trend, in either direction.'],
@@ -155,6 +191,8 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
     { sheet: 'Summary', data: summary, columns: [{ width: 28 }, { width: 14 }, { width: 11 }, { width: 11 }, { width: 12 }, { width: 12 }, { width: 14 }] },
     stockSheet('Bullish setups', bull),
     stockSheet('Bearish setups', bear),
+    { sheet: 'Momentum', data: momentum, columns: [{ width: 15 }, { width: 24 }, { width: 12 }, { width: 10 }, { width: 10 }, { width: 18 }, { width: 10 }, { width: 18 }, { width: 11 }, { width: 18 }, { width: 11 }], stickyRowsCount: 1, stickyColumnsCount: 1 },
+    { sheet: 'Breakouts', data: breakouts, columns: [{ width: 15 }, { width: 24 }, { width: 12 }, { width: 10 }, { width: 11 }, { width: 14 }, { width: 11 }, { width: 14 }, { width: 11 }, { width: 18 }, { width: 11 }], stickyRowsCount: 1 },
     { sheet: 'Sectors', data: sectorSheet, columns: [{ width: 28 }, { width: 9 }, { width: 11 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 14 }], stickyRowsCount: 1 },
     stockSheet('All stocks', [...rows].sort((x, y) => x.s.localeCompare(y.s))),
     { sheet: 'Settings', data: settingsSheet, columns: [{ width: 26 }, { width: 12 }] },
