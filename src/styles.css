@@ -302,3 +302,24 @@ input[type='color'] { width: 44px; height: 32px; padding: 0; border: 1px solid v
 }
 .stat strong .up-t { color: var(--up); }
 .stat strong .down-t { color: var(--down); }
+
+/* ---- sign-in screen ---- */
+.signin { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); position: relative; overflow: hidden; }
+.signin-glow { position: absolute; inset: -20% -10% auto -10%; height: 60%; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 38%, transparent), transparent); filter: blur(30px); pointer-events: none; }
+.signin-card { position: relative; width: min(400px, 100%); background: color-mix(in srgb, var(--card) 92%, transparent); border: 1px solid var(--line); border-radius: 22px; padding: 32px 24px 22px; box-shadow: var(--shadow); display: grid; gap: 6px; text-align: center; backdrop-filter: blur(10px); }
+.signin-logo { justify-self: center; width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); margin-bottom: 6px; }
+.signin-card h1 { font-size: 24px; letter-spacing: -0.3px; }
+.signin-card .muted { margin: 0 0 14px; font-size: 14px; }
+.signin-field { text-align: left; display: grid; gap: 6px; }
+.signin-field > span { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.signin-input { display: flex; align-items: center; background: var(--card2); border: 1px solid var(--line); border-radius: 14px; padding: 0 6px 0 14px; }
+.signin-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.signin-input input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text); font: inherit; font-size: 16px; padding: 15px 0; }
+.signin-eye { background: transparent; -webkit-tap-highlight-color: transparent; border: 0; color: var(--accent); font-weight: 600; font-size: 13px; padding: 10px; min-width: 52px; }
+.signin-error { margin: 2px 0 0; color: var(--down); font-size: 13px; text-align: left; }
+.signin-btn { margin-top: 12px; padding: 14px; font-size: 16px; border-radius: 14px; }
+.signin-foot { margin: 16px 0 0; font-size: 11.5px; color: var(--muted); }
+@media (max-width: 480px) {
+  .signin { align-items: start; padding-top: 14vh; }
+  .signin-card { background: transparent; border-color: transparent; box-shadow: none; backdrop-filter: none; padding: 8px 4px; }
+}
