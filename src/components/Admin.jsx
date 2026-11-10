@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Card } from './ui.jsx';
-import { isAdmin, login, logout, lockedFor } from '../lib/auth.js';
+import { logout } from '../lib/auth.js';
 import { clearSavedSettings } from '../lib/settings.js';
 import { ageText } from '../lib/fmt.js';
 import { analyseAll } from '../lib/signals.js';
@@ -24,37 +24,6 @@ function validate(sc) {
   if (num('rr1') && sc.rr1 <= 0) e.push('Target 1 multiplier must be above 0.');
   if (num('rr1') && num('rr2') && sc.rr2 <= sc.rr1) e.push('Target 2 must be further than Target 1.');
   return e;
-}
-
-function Login({ onDone }) {
-  const [pw, setPw] = useState('');
-  const [msg, setMsg] = useState('');
-  const submit = (e) => {
-    e.preventDefault();
-    const res = login(pw);
-    if (res.ok) onDone();
-    else {
-      setMsg(res.message);
-      setPw('');
-    }
-  };
-  return (
-    <div className="login-wrap">
-      <form className="card login" onSubmit={submit}>
-        <div className="lock">🔒</div>
-        <h2>Admin sign in</h2>
-        <p className="muted small">Enter the admin password to change branding, screener rules and view data health.</p>
-        <label className="field">
-          <span>Password</span>
-          <input className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus autoComplete="current-password" disabled={lockedFor() > 0} />
-        </label>
-        {msg && <p className="error" role="alert">{msg}</p>}
-        <button className="btn primary block" type="submit" disabled={!pw}>
-          Sign in
-        </button>
-      </form>
-    </div>
-  );
 }
 
 const NumField = ({ label, hint, value, onChange, step = 1, min, max }) => (
@@ -273,15 +242,5 @@ function Panel({ settings, onChange, meta, universe, stocks, onLogout }) {
 }
 
 export default function Admin(props) {
-  const [authed, setAuthed] = useState(isAdmin());
-  if (!authed) return <Login onDone={() => setAuthed(true)} />;
-  return (
-    <Panel
-      {...props}
-      onLogout={() => {
-        logout();
-        setAuthed(false);
-      }}
-    />
-  );
+  return <Panel {...props} onLogout={() => { logout(); window.location.reload(); }} />;
 }

@@ -77,7 +77,7 @@ Other free sources if needed later: NSE F&O UDiFF bhavcopy (end-of-day OI, free,
 - "Require volume" toggle makes setups stricter (off by default)
 
 ## 6. Admin panel
-- Password: `ADMIN#@1234` (in `src/lib/auth.js`). 5 wrong tries lock it for 30 seconds.
+- Login (whole site is gated): username `ADMIN`, password `Vishu@4321` (in `src/lib/auth.js`). 5 wrong tries lock it for 30 seconds.
 - **This is not real security.** The password is inside the JavaScript sent to every visitor. It only keeps casual visitors out of the settings screen. Never put secrets or private client data behind it. For real protection add a serverless function or Cloudflare Access.
 - Settings saved in the admin panel live in that browser (localStorage). To make them the default for everyone: Admin > Export settings > paste into `public/config.json` > push.
 

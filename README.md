@@ -19,7 +19,7 @@ npm run dev       # http://localhost:5173
 ```
 
 ## Admin
-Open the **Admin** tab. Password: `ADMIN#@1234` (change it in `src/lib/auth.js`).
+Open the **Admin** tab. Password: username `ADMIN`, password `Vishu@4321` (change in `src/lib/auth.js`). The whole site opens on this login screen.
 This is a client-side gate only. See `PROJECT_NOTES.md` for what that means.
 
 ## Data

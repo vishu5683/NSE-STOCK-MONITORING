@@ -6,7 +6,8 @@
 // private client data behind it. For real protection add a backend (e.g. Vercel serverless function
 // or Cloudflare Access) in front of the site.
 
-const ADMIN_PASSWORD = 'ADMIN#@1234';
+const ADMIN_USER = 'ADMIN';
+const ADMIN_PASSWORD = 'Vishu@4321';
 const SESSION_KEY = 'nsestocks.admin';
 const LOCK_KEY = 'nsestocks.lock';
 const MAX_TRIES = 5;
@@ -40,11 +41,11 @@ export function lockedFor() {
   return 0;
 }
 
-export function login(password) {
+export function login(username, password) {
   const wait = lockedFor();
   if (wait > 0) return { ok: false, message: `Too many attempts. Try again in ${wait}s.` };
 
-  if (password === ADMIN_PASSWORD) {
+  if (String(username).trim().toLowerCase() === ADMIN_USER.toLowerCase() && password === ADMIN_PASSWORD) {
     write(SESSION_KEY, '1');
     write(LOCK_KEY, null);
     return { ok: true };
@@ -60,7 +61,7 @@ export function login(password) {
     return { ok: false, message: 'Too many attempts. Locked for 30 seconds.' };
   }
   write(LOCK_KEY, JSON.stringify({ tries }));
-  return { ok: false, message: `Wrong password. ${MAX_TRIES - tries} tries left.` };
+  return { ok: false, message: `Wrong username or password. ${MAX_TRIES - tries} tries left.` };
 }
 
 export function logout() {

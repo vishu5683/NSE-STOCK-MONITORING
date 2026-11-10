@@ -6,6 +6,8 @@ import Dashboard, { SectorHeatmap } from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
 import Reports from './components/Reports.jsx';
 import Admin from './components/Admin.jsx';
+import LoginScreen from './components/LoginScreen.jsx';
+import { isAdmin } from './lib/auth.js';
 import StockModal from './components/StockModal.jsx';
 import { Card, Change } from './components/ui.jsx';
 
@@ -24,6 +26,7 @@ const tabFromHash = () => {
 };
 
 export default function App() {
+  const [authed, setAuthed] = useState(isAdmin());
   const [settings, setSettings] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -121,6 +124,7 @@ export default function App() {
     window.scrollTo({ top: 0 });
   };
 
+  if (!authed) return <LoginScreen name="NSE Stocks Pro" tagline="Sign in to open the dashboard" onDone={() => setAuthed(true)} />;
   if (error) {
     return (
       <div className="boot">
