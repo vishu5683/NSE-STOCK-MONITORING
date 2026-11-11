@@ -228,3 +228,11 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 - UPSTOX_ANALYTICS_TOKEN is set in Vercel (Production). /api/quotes source = upstox, SENSEX is now live too. Yahoo stays the automatic fallback.
 - ICICIPRULI is now ICICILIFE on NSE (same company, 438.40 close on 9-Nov). Renamed in universe.csv and lot_sizes.csv.
 - build-instruments.mjs also takes the BE series when a stock has no EQ row (HFCL moved to trade-for-trade). Map is 259 of 259.
+
+### 16. Phase 2: live F&O from Upstox (11-Nov-2026)
+- api/_lib/upstoxOi.js + /api/oi: one v2/option/chain call per F&O underlying (205 stocks + NIFTY + BANKNIFTY), nearest unexpired expiry from _instruments.json 'fo', paced to ~20 req/s (Upstox allows ~50/s; 10 parallel calls got HTTP 429 on 84 of 207), one retry on 429, cached 5 min. Summary fields match the bhavcopy layer (pcr, callOiRes, putOiSup, callWriting(+Oi), putWriting(+Oi), maxPain, step, iv from ATM greeks, optExpiry, ceOi, peOi). Near-month futures via v2/market-quote/quotes (full): futLive, futOiLive, futVolLive, futCp = last_price - net_change (ohlc.close is the running close).
+- /api/chain?s=SYMBOL: live strike chain for the popup (ATM +/-10, indices +/-30), cached 60 s; F&O names only.
+- Browser: applyOi (live.js) only while meta.foDate < live day, so the evening NSE files win once they are in. Futures OI change = live OI - previous NSE close OI; build-up from futures price vs previous close and that change. Labels switch between (live) and (EOD).
+- build-instruments.mjs writes 'fo' (underlying key, futures [expiry,key], option expiries); the workflow runs it daily and commits api/_instruments.json.
+- vercel.json maxDuration 30 s. Checked live 11-Nov 17:24 IST: 205 option chains + 205 futures, 0 failed; RELIANCE PCR 0.78 vs NSE EOD 0.80; NIFTY ATM IV 17.8 vs India VIX 17.6.
+- Not done: index ITM / ATM / OTM premium table still reads the end-of-day chain.json.
