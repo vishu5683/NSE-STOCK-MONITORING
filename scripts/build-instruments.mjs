@@ -18,9 +18,12 @@ async function load(name) {
 
 const [nse, bse] = await Promise.all([load('NSE'), load('BSE')]);
 
+// EQ series first; a stock moved to trade-for-trade (BE, e.g. HFCL in Nov-2026) is still the same company
 const eq = new Map();
-for (const r of nse) {
-  if (r.segment === 'NSE_EQ' && r.instrument_type === 'EQ' && r.trading_symbol && r.instrument_key) eq.set(r.trading_symbol, r.instrument_key);
+for (const series of ['EQ', 'BE']) {
+  for (const r of nse) {
+    if (r.segment === 'NSE_EQ' && r.instrument_type === series && r.trading_symbol && r.instrument_key && !eq.has(r.trading_symbol)) eq.set(r.trading_symbol, r.instrument_key);
+  }
 }
 
 const symbols = fs

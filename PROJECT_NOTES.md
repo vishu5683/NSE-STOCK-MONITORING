@@ -223,3 +223,8 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 ### 15i. Dashboard v2, downloads off (11-Nov-2026)
 - Dashboard: Market Mood hero (mood from breadth, NIFTY change and NIFTY vs VWAP; six tiles that open the matching Pro Sheet tab: matched, intraday BUY / SELL, setups, FII index futures long %, F&O ban), index cards with VWAP side / PCR / ATM chips, heatmap without an inner scroll (top 8 + bottom 4, link to all), 'View all' on every list (opens the Pro Sheet tab via localStorage nsestocks.scanView), new lists 'Intraday signals now' and 'Opening range breakouts'.
 - src/lib/features.js DOWNLOADS_ENABLED = false: Reports tab and per-sheet Excel buttons hidden (code kept). The client tracks live on screen only. Admin config export stays.
+
+### 15j. Upstox live on (11-Nov-2026)
+- UPSTOX_ANALYTICS_TOKEN is set in Vercel (Production). /api/quotes source = upstox, SENSEX is now live too. Yahoo stays the automatic fallback.
+- ICICIPRULI is now ICICILIFE on NSE (same company, 438.40 close on 9-Nov). Renamed in universe.csv and lot_sizes.csv.
+- build-instruments.mjs also takes the BE series when a stock has no EQ row (HFCL moved to trade-for-trade). Map is 259 of 259.
