@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { loadSettings, saveSettings } from './lib/settings.js';
 import { analyseAll, marketBreadth, sectorStats } from './lib/signals.js';
 import { ageText, hoursSince } from './lib/fmt.js';
-import { applyBook } from './lib/live.js';
-import { fetchLive, probe, pollMs, hasToken, clearToken } from './lib/liveApi.js';
+import { applyBook, applyIntraday } from './lib/live.js';
+import { fetchLive, fetchIntraday, probe, pollMs, hasToken, clearToken, marketOpenNow } from './lib/liveApi.js';
 import { logout, LOGIN_ENABLED } from './lib/auth.js';
-import Dashboard, { SectorHeatmap } from './components/Dashboard.jsx';
+import Dashboard from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
 import Scanners from './components/Scanners.jsx';
 import Reports from './components/Reports.jsx';
@@ -13,13 +13,11 @@ import Admin from './components/Admin.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
 import { isAdmin } from './lib/auth.js';
 import StockModal from './components/StockModal.jsx';
-import { Card, Change } from './components/ui.jsx';
 
 const TABS = [
+  { id: 'scanners', label: 'Pro Sheet', icon: 'M4 18l5-6 4 3 7-9M4 4v16h16' },
   { id: 'dashboard', label: 'Dashboard', icon: 'M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z' },
-  { id: 'scanners', label: 'Scanners', icon: 'M4 18l5-6 4 3 7-9M4 4v16h16' },
   { id: 'screener', label: 'Screener', icon: 'M3 5h18l-7 8v6l-4 2v-8z' },
-  { id: 'sectors', label: 'Sectors', icon: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z' },
   { id: 'reports', label: 'Reports', icon: 'M12 3v12m0 0l-5-5m5 5l5-5M4 21h16' },
   { id: 'admin', label: 'Admin', icon: 'M7 10V7a5 5 0 0110 0v3M5 10h14v11H5z' },
 ];
@@ -27,7 +25,7 @@ const REFRESH_MS = 10 * 60 * 1000;
 
 const tabFromHash = () => {
   const id = window.location.hash.replace('#/', '');
-  return TABS.some((t) => t.id === id) ? id : 'dashboard';
+  return TABS.some((t) => t.id === id) ? id : 'scanners';
 };
 
 export default function App() {
@@ -38,6 +36,7 @@ export default function App() {
   const [tab, setTab] = useState(tabFromHash());
   const [picked, setPicked] = useState(null);
   const [live, setLive] = useState(null);
+  const [intra, setIntra] = useState(null);
   const [sectorFilter, setSectorFilter] = useState('');
   const [theme, setTheme] = useState(() => {
     try {
@@ -149,6 +148,29 @@ export default function App() {
     };
   }, [authed]);
 
+  // Live 5-minute indicators: once a minute while the market is open, once when it is closed.
+  useEffect(() => {
+    if (import.meta.env.DEV || !authed || (LOGIN_ENABLED && !hasToken())) return undefined;
+    let timer = null;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      if (document.visibilityState === 'visible') {
+        const body = await fetchIntraday();
+        if (stopped) return;
+        if (body) setIntra(body);
+      }
+      if (marketOpenNow()) timer = setTimeout(tick, 60000);
+    };
+    probe().then((p) => {
+      if (!stopped && p.available && p.live) tick();
+    });
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [authed]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try {
@@ -178,7 +200,7 @@ export default function App() {
     [settings, updateSettings],
   );
 
-  const book = useMemo(() => (data ? applyBook(data, live) : null), [data, live]);
+  const book = useMemo(() => (data ? applyIntraday(applyBook(data, live), intra) : null), [data, live, intra]);
 
   const rows = useMemo(() => {
     if (!book || !settings) return [];
@@ -241,7 +263,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand" onClick={() => go('dashboard')} role="link" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && go('dashboard')}>
+        <div className="brand" onClick={() => go('scanners')} role="link" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && go('scanners')}>
           <svg width="28" height="28" viewBox="0 0 64 64" aria-hidden="true">
             <rect width="64" height="64" rx="14" fill="var(--accent)" />
             <path d="M10 44 24 28l9 8 21-20" fill="none" stroke="#fff" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
@@ -294,7 +316,9 @@ export default function App() {
             {live.source === 'yahoo'
               ? `Prices from Yahoo Finance (${live.mapped} symbols, unofficial feed, usually within a minute for NSE stocks, SENSEX about 15 minutes late).`
               : `Upstox live prices are on (${live.mapped} symbols).`}{' '}
-            RSI, EMA, ADX, VWAP and volume spike come from the last data refresh; VWAP side, CPR zone, ATM strike and scanner signals follow the live price.
+            {intra?.count
+              ? `Intraday EMA 9/15, RSI and MACD are live for ${intra.count} stocks (5-minute candles, refreshed every minute). VWAP, CPR, daily RSI / ADX and OI come from the last data refresh.`
+              : 'RSI, EMA, ADX, VWAP and volume spike come from the last data refresh; VWAP side, CPR zone, ATM strike and scanner signals follow the live price.'}
             {live.unmapped?.length > 0 ? ` No Upstox key for: ${live.unmapped.join(', ')}.` : ''}
             {live.stale ? ` Showing the last good prices: ${live.warning}` : ''}
             {live.partial && !live.stale ? ' Some prices could not be refreshed this round.' : ''}
@@ -319,52 +343,9 @@ export default function App() {
         )}
 
         {tab === 'dashboard' && <Dashboard rows={rows} indices={book.indices} breadth={breadth} sectors={sectors} onOpen={setPicked} onGoScreener={openSector} />}
-        {tab === 'scanners' && <Scanners rows={rows} indices={book.indices} settings={settings} onOpen={setPicked} meta={meta} />}
+        {tab === 'scanners' && <Scanners rows={rows} indices={book.indices} sectors={sectors} settings={settings} onOpen={setPicked} onSector={openSector} meta={meta} />}
         {tab === 'screener' && (
           <Screener rows={rows} sectors={sectors} initialSector={sectorFilter} watchlist={settings.watchlist || []} onOpen={setPicked} onToggleWatch={toggleWatch} />
-        )}
-        {tab === 'sectors' && (
-          <>
-            <SectorHeatmap sectors={sectors} onPick={openSector} />
-            <Card title="Sector table">
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Sector</th>
-                      <th>Stocks</th>
-                      <th>Advancing</th>
-                      <th>1D %</th>
-                      <th>1W %</th>
-                      <th>1M %</th>
-                      <th>Bullish</th>
-                      <th>Bearish</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sectors.map((s) => (
-                      <tr key={s.sector} tabIndex={0} onClick={() => openSector(s.sector)} onKeyDown={(e) => e.key === 'Enter' && openSector(s.sector)}>
-                        <td className="sym">{s.sector}</td>
-                        <td className="num">{s.count}</td>
-                        <td className="num">{s.adv}</td>
-                        <td>
-                          <Change value={s.chg} />
-                        </td>
-                        <td>
-                          <Change value={s.chg1w} d={1} />
-                        </td>
-                        <td>
-                          <Change value={s.chg1m} d={1} />
-                        </td>
-                        <td className="up-t num">{s.bull}</td>
-                        <td className="down-t num">{s.bear}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </>
         )}
         {tab === 'reports' && <Reports ctx={ctx} />}
         {tab === 'admin' && <Admin settings={settings} onChange={updateSettings} meta={meta} universe={book.stocks.map((s) => s.s)} stocks={book.stocks} />}

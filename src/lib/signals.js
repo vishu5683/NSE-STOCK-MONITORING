@@ -70,7 +70,7 @@ export function tradePlan(s, side, c) {
   };
 }
 
-export function analyse(s, c) {
+function analyse(s, c) {
   const bull = bullScore(s, c);
   const bear = bearScore(s, c);
   const volOk = has(s.volSpike) && s.volSpike >= c.volSpike;

@@ -104,6 +104,18 @@ export async function fetchLive() {
   }
 }
 
+// Live 5-minute indicators (EMA 9/15, RSI, MACD) for all stocks. Returns the payload or null.
+export async function fetchIntraday() {
+  const token = read();
+  try {
+    const { res, body } = await jsonFetch('./api/intraday', token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 15000);
+    if (!res.ok || !body?.stocks) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
+
 // NSE cash session in IST, Mon-Fri 09:15-15:30. Poll fast while it is open, slowly otherwise.
 export function marketOpenNow(now = new Date()) {
   const ist = new Date(now.getTime() + 5.5 * 3600 * 1000);

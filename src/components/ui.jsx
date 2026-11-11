@@ -5,7 +5,7 @@ export function Change({ value, d = 2 }) {
   return <span className={`chg ${tone(value)}`}>{pct(value, d)}</span>;
 }
 
-export function Badge({ kind = 'neutral', children }) {
+function Badge({ kind = 'neutral', children }) {
   return <span className={`badge badge-${kind}`}>{children}</span>;
 }
 

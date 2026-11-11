@@ -43,3 +43,28 @@ export function applyBook(data, live) {
     indices: data.indices.map((i) => applyLive(i, live.indices?.[i.name])),
   };
 }
+
+// Overlay the server's live 5-minute indicators (/api/intraday) on the rows. VWAP / CPR / ORB stay from the data file.
+const IND_KEYS = ['ema9i', 'ema15i', 'rsiI', 'macdI', 'macdIsig'];
+const istStamp = (iso) => {
+  const d = new Date(new Date(iso).getTime() + 330 * 60000);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 16).replace('T', ' ');
+};
+
+function overlay(row, ind) {
+  if (!ind) return row;
+  const next = { ...row };
+  for (const k of IND_KEYS) if (isNum(ind[k])) next[k] = ind[k];
+  if (ind.iAt) next.iAsOf = istStamp(ind.iAt) || row.iAsOf;
+  next.iLive = true;
+  return next;
+}
+
+export function applyIntraday(data, intra) {
+  if (!data || !intra?.stocks) return data;
+  return {
+    ...data,
+    stocks: data.stocks.map((s) => overlay(s, intra.stocks[s.s])),
+    indices: data.indices.map((i) => overlay(i, intra.indices?.[i.name])),
+  };
+}

@@ -1,6 +1,6 @@
 import { price, pct, dec, mult } from './fmt.js';
 import { weeklyLabel, monthlyLabel, convictionLabel, breakoutLabel } from './signals.js';
-import { intradaySignal, settingsMatch, cprZone, atmStrike, indexSignal } from './intraday.js';
+import { intradaySignal, settingsMatch, cprLabel, atmFor, indexSignal } from './intraday.js';
 
 function download(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -183,10 +183,6 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
     .map((r) => ({ r, x: intradaySignal(r, c) }))
     .filter(({ x }) => x.signal !== 'NO DATA')
     .sort((a, b) => sigOrder[a.x.signal] - sigOrder[b.x.signal] || (b.r.valueCr ?? 0) - (a.r.valueCr ?? 0));
-  const cprLabel = (r) => {
-    const z = cprZone(r, c);
-    return !z ? '' : z.wide ? 'WIDE' : z.inside ? 'INSIDE' : z.above ? 'ABOVE' : 'BELOW';
-  };
   const intraday = [
     head(['Symbol', 'Sector', 'LTP', 'Today %', 'VWAP', 'vs VWAP', 'EMA 9 (5m)', 'EMA 15 (5m)', 'RSI (5m)', 'MACD (5m)', 'MACD signal', 'CPR BC', 'CPR TC', 'CPR width %', 'CPR zone', 'ATM', 'Signal', 'Stop loss', 'Target 1', 'Lot size', 'Settings match', 'Last candle']),
     ...(intraRows.length
@@ -196,7 +192,7 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
               { value: r.s, fontWeight: 'bold' }, text(r.sec), n(r.ltp, '#,##0.00', { fontWeight: 'bold' }), changeCell(r.chg), n(r.vwap, '#,##0.00'),
               text(r.ltp > r.vwap ? 'ABOVE' : 'BELOW', { textColor: r.ltp > r.vwap ? '#15803d' : '#b91c1c', fontWeight: 'bold', align: 'center' }),
               n(r.ema9i, '#,##0.00'), n(r.ema15i, '#,##0.00'), rsiCell(r.rsiI), n(r.macdI, '0.000'), n(r.macdIsig, '0.000'),
-              n(r.cprBc, '#,##0.00'), n(r.cprTc, '#,##0.00'), n(r.cprWidthPct, '0.00'), text(cprLabel(r), { align: 'center' }), n(atmStrike(r.ltp), '#,##0'),
+              n(r.cprBc, '#,##0.00'), n(r.cprTc, '#,##0.00'), n(r.cprWidthPct, '0.00'), text(cprLabel(r, c), { align: 'center' }), n(atmFor(r), '#,##0'),
               sigCell(x), n(x.plan?.stop, '#,##0.00', { textColor: '#b91c1c' }), n(x.plan?.t1, '#,##0.00', { textColor: '#15803d' }), n(r.lot, '#,##0'),
               text(settingsMatch(r, x).label, { fontWeight: 'bold' }), text(r.iAsOf || ''),
             ],

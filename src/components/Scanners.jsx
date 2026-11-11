@@ -9,7 +9,7 @@ import {
   rsiStatus,
   adxStatus,
   macdStatus,
-  cprZone,
+  cprLabel,
   intradaySignal,
   settingsMatch,
   breakoutSignal,
@@ -19,6 +19,14 @@ import {
   pcrSentiment,
   todayLabel,
   buildupTone,
+  gapLabel,
+  gapPct,
+  orbStatus,
+  pdStatus,
+  rangeBreak20,
+  patternTags,
+  breakScore,
+  participantView,
 } from '../lib/intraday.js';
 import { exportTable } from '../lib/exporters.js';
 
@@ -35,8 +43,30 @@ const VIEWS = [
   { id: 'swing', label: 'Swing' },
   { id: 'heatmap', label: 'Sector Heatmap' },
   { id: 'intraday', label: 'Intraday' },
+  { id: 'patterns', label: 'Patterns & ORB' },
+  { id: 'fii', label: 'FII / DII' },
 ];
 const VIEW_KEY = 'nsestocks.scanView';
+const ALERT_KEY = 'nsestocks.alerts';
+const readFlag = (k) => {
+  try {
+    return localStorage.getItem(k) === '1';
+  } catch {
+    return false;
+  }
+};
+
+// What a stock is "doing" right now; an alert fires when this changes into something tradable.
+const alertState = (r) => ({ match: r.match.tone === 'up' || r.match.tone === 'down' ? r.match.label : '', sig: r.intra.signal, orb: orbStatus(r).kind });
+
+function alertEvents(prev, r) {
+  const now = alertState(r);
+  const out = [];
+  if (now.match && now.match !== prev.match) out.push({ text: `${r.s}: ${now.match}`, tone: r.match.tone });
+  if ((now.sig === 'BUY' || now.sig === 'SELL') && now.sig !== prev.sig) out.push({ text: `${r.s}: intraday ${sigText(r.intra)} at ${price(r.ltp)}`, tone: now.sig === 'BUY' ? 'up' : 'down' });
+  if ((now.orb === 'up' || now.orb === 'down') && now.orb !== prev.orb && prev.orb === 'inside') out.push({ text: `${r.s}: ${orbStatus(r).label}`, tone: now.orb });
+  return out;
+}
 const has = (x) => typeof x === 'number' && Number.isFinite(x);
 
 const toneClass = (t) => (t === 'up' ? 'up-t' : t === 'down' ? 'down-t' : t === 'warn' ? 'warn-t' : 'muted');
@@ -106,14 +136,14 @@ function Grid({ rows, cols, initialSort, onOpen, empty, title, ctx }) {
           {busy ? 'Preparing…' : '⬇ Excel (this tab)'}
         </button>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap sheet-wrap">
         <table className="table">
           <thead>
             <tr>
               {cols.map((c, i) => {
                 const on = sort?.i === i;
                 const can = c.sort !== false;
-                const cls = `${can ? 'sortable' : ''} ${c.hide ? `hide-${c.hide}` : ''}`;
+                const cls = `${can ? 'sortable' : ''} ${c.hide ? `hide-${c.hide}` : ''} ${c.freeze ? 'freeze' : ''}`;
                 return (
                   <th
                     key={c.label}
@@ -131,7 +161,7 @@ function Grid({ rows, cols, initialSort, onOpen, empty, title, ctx }) {
             {list.slice(0, limit).map((r) => (
               <tr key={r.s || r.name} tabIndex={onOpen ? 0 : undefined} onClick={onOpen ? () => onOpen(r) : undefined} onKeyDown={onOpen ? (e) => e.key === 'Enter' && onOpen(r) : undefined}>
                 {cols.map((c) => (
-                  <td key={c.label} className={`${c.hide ? `hide-${c.hide}` : ''} ${c.cls || ''}`}>
+                  <td key={c.label} className={`${c.hide ? `hide-${c.hide}` : ''} ${c.cls || ''} ${c.freeze ? 'freeze' : ''}`}>
                     {c.cell ? c.cell(r) : c.x(r) ?? '-'}
                   </td>
                 ))}
@@ -152,7 +182,32 @@ function Grid({ rows, cols, initialSort, onOpen, empty, title, ctx }) {
 }
 
 // shared columns
-const SYM = { label: 'Symbol', x: (r) => r.s, cell: (r) => <strong className="sym">{r.s}</strong>, str: true };
+const SYM = {
+  label: 'Symbol',
+  x: (r) => r.s,
+  cell: (r) => (
+    <strong className="sym">
+      {r.s}
+      {r.inBan && <span className="ban-chip" title="In the NSE F&O ban period: no fresh positions">BAN</span>}
+    </strong>
+  ),
+  str: true,
+  freeze: true,
+};
+// symbol with a rank in front (Setups, Most Active), still the frozen column
+const rankSym = (rankOf) => ({
+  ...SYM,
+  label: 'Symbol',
+  cell: (r) => (
+    <strong className="sym">
+      <em className="rank">#{rankOf(r)}</em>
+      {r.s}
+      {r.inBan && <span className="ban-chip">BAN</span>}
+    </strong>
+  ),
+});
+const DELIV = { label: 'Delivery %', x: (r) => r.delivPct, cell: (r) => <span className={r.delivPct >= 60 ? 'up-t' : r.delivPct < 25 ? 'muted' : ''}>{dec(r.delivPct, 1)}</span>, cls: 'num', hide: 'md' };
+const MWPL = { label: 'MWPL %', x: (r) => r.mwplPct, cell: (r) => <span className={r.mwplPct >= 80 ? 'warn-t' : ''} title="Market-wide position limit used. 95% puts the stock in the F&O ban.">{dec(r.mwplPct, 1)}</span>, cls: 'num', hide: 'sm' };
 const NAME = { label: 'Company', x: (r) => r.name || '', cell: (r) => <span className="muted small ellipsis-cell">{r.name || '-'}</span>, str: true, hide: 'md' };
 const SEC = { label: 'Sector', x: (r) => r.sec, cell: (r) => <span className="muted">{r.sec}</span>, str: true, hide: 'md' };
 const LTP = { label: 'LTP', x: (r) => r.ltp, cell: (r) => <Tick value={r.ltp} />, cls: 'num' };
@@ -160,7 +215,7 @@ const CHG = { label: 'Chg %', x: (r) => r.chg, cell: (r) => <Change value={r.chg
 const MATCH = { label: 'Settings Match', x: (r) => r.match.label, cell: (r) => <Tag v={r.match} />, str: true };
 const LOT = { label: 'Lot', x: (r) => r.lot, cell: (r) => int(r.lot), cls: 'num', hide: 'md' };
 
-export default function Scanners({ rows, indices, settings, onOpen, meta }) {
+export default function Scanners({ rows, indices, sectors, settings, onOpen, onSector, meta }) {
   const [view, setView] = useState(() => {
     try {
       const v = localStorage.getItem(VIEW_KEY);
@@ -171,6 +226,9 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
   });
   const [q, setQ] = useState('');
   const [chainOf, setChainOf] = useState(null);
+  const [alertsOn, setAlertsOn] = useState(() => readFlag(ALERT_KEY));
+  const [toasts, setToasts] = useState([]);
+  const lastState = useRef(null);
   const c = settings.screener;
   const ctx = { meta, settings };
 
@@ -197,6 +255,46 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
       return { ...r, intra, match: settingsMatch(r, intra), brk: breakoutSignal(r, c), swing: swingSignal(r, c), atm: atmFor(r), turnRank: turnRank.get(r.s) };
     });
   }, [rows, c]);
+  // Alerts: compare each refresh / live tick with the previous one
+  useEffect(() => {
+    const next = new Map(enriched.map((r) => [r.s, alertState(r)]));
+    const prev = lastState.current;
+    lastState.current = next;
+    if (!alertsOn || !prev) return;
+    const events = enriched.flatMap((r) => (prev.has(r.s) ? alertEvents(prev.get(r.s), r) : [])).slice(0, 6);
+    if (!events.length) return;
+    const stamp = Date.now();
+    setToasts((t) => [...events.map((e, i) => ({ ...e, id: `${stamp}-${i}` })), ...t].slice(0, 5));
+    try {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(`${settings.clientName}: ${events.length} new signal${events.length > 1 ? 's' : ''}`, { body: events.map((e) => e.text).join('\n'), tag: 'nsestocks-signal' });
+      }
+    } catch {
+      /* some mobile browsers only allow notifications from a service worker */
+    }
+  }, [enriched, alertsOn, settings.clientName]);
+  useEffect(() => {
+    if (!toasts.length) return undefined;
+    const t = setTimeout(() => setToasts((x) => x.slice(0, -1)), 12000);
+    return () => clearTimeout(t);
+  }, [toasts]);
+  const toggleAlerts = async () => {
+    const on = !alertsOn;
+    if (on && 'Notification' in window && Notification.permission === 'default') {
+      try {
+        await Notification.requestPermission();
+      } catch {
+        /* toasts still work */
+      }
+    }
+    try {
+      localStorage.setItem(ALERT_KEY, on ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    setAlertsOn(on);
+  };
+
   const needle = q.trim().toUpperCase();
   const shown = needle
     ? enriched.filter((r) => r.s.includes(needle) || (r.sec || '').toUpperCase().includes(needle) || (r.name || '').toUpperCase().includes(needle))
@@ -223,7 +321,7 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
         <div className="stat"><span>Intraday SELL</span><strong className="down-t">{stats.sell}</strong></div>
         <div className="stat"><span>No-trade (CPR)</span><strong className="warn-t">{stats.noTrade}</strong></div>
         <div className="stat"><span>Last 5-min candle</span><strong>{stats.lastBar ? stats.lastBar.slice(11) : '-'}</strong></div>
-        <div className="stat"><span>F&O data</span><strong>{meta.foDate ? `${stats.fno} · ${meta.foDate}` : '-'}</strong></div>
+        <div className="stat"><span>F&O data (EOD)</span><strong>{meta.foDate ? `${stats.fno} · ${shortDate(meta.foDate)}` : '-'}</strong></div>
       </div>
       {matched.length > 0 && (
         <details className="small muted match-line">
@@ -235,7 +333,19 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
         </details>
       )}
 
-      <Card title="F&O Pro Sheet" right={<input className="input" placeholder="Search symbol, company or sector" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" />}>
+      <Card
+        className="sheet-card"
+        title="F&O Pro Sheet"
+        right={
+          <div className="sheet-head-tools">
+            <button className={`btn sm ${alertsOn ? 'primary' : 'ghost'}`} onClick={toggleAlerts} aria-pressed={alertsOn} title="Toast + browser notification when a stock newly matches, gives an intraday BUY / SELL or breaks its opening range">
+              {alertsOn ? '🔔' : '🔕'}
+              <span className="alert-text">{alertsOn ? ' Alerts on' : ' Alerts off'}</span>
+            </button>
+            <input className="input" placeholder="Search symbol, company or sector" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" />
+          </div>
+        }
+      >
         <div className="toolbar">
           <div className="seg wrap sheet-tabs" role="tablist" ref={tabsRef}>
             {VIEWS.map((v) => (
@@ -254,11 +364,10 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
             ctx={ctx}
             rows={shown}
             onOpen={onOpen}
-            initialSort={{ i: 6, dir: -1 }}
+            initialSort={{ i: 5, dir: -1 }}
             empty="No stocks."
             cols={[
-              { label: 'Rank', x: (r) => r.turnRank, cls: 'num' },
-              SYM,
+              rankSym((r) => r.turnRank),
               NAME,
               SEC,
               LTP,
@@ -267,6 +376,7 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
               { label: 'Volume', x: (r) => r.volume, cell: (r) => compact(r.volume), cls: 'num', hide: 'sm' },
               { label: 'Vol Spike', x: (r) => r.volSpike, cell: (r) => <span className={r.volSpike >= c.volSpike ? 'up-t' : ''}>{mult(r.volSpike)}</span>, cls: 'num', hide: 'sm' },
               { label: '20D Avg Vol', x: (r) => r.avgVol20, cell: (r) => compact(r.avgVol20), cls: 'num', hide: 'md' },
+              DELIV,
               { label: 'VWAP', x: (r) => r.vwap, cell: (r) => price(r.vwap), cls: 'num', hide: 'md' },
               { label: 'Day High', x: (r) => r.high, cell: (r) => price(r.high), cls: 'num', hide: 'md' },
               { label: 'Day Low', x: (r) => r.low, cell: (r) => price(r.low), cls: 'num', hide: 'md' },
@@ -304,6 +414,8 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
               { label: 'Change in OI', x: (r) => r.futOiChg, cell: (r) => <span className={r.futOiChg > 0 ? 'up-t' : r.futOiChg < 0 ? 'down-t' : ''}>{compact(r.futOiChg)}</span>, cls: 'num', hide: 'md' },
               { label: 'PCR', x: (r) => r.pcr, cell: (r) => dec(r.pcr, 2), cls: 'num' },
               { label: 'IV %', x: (r) => r.iv, cell: (r) => dec(r.iv, 1), cls: 'num', hide: 'sm' },
+              MWPL,
+              DELIV,
               { label: '52W High', x: (r) => r.hi52, cell: (r) => price(r.hi52), cls: 'num', hide: 'md' },
               { label: '52W Low', x: (r) => r.lo52, cell: (r) => price(r.lo52), cls: 'num', hide: 'md' },
               { label: 'Dist High %', x: (r) => r.distHi, cell: (r) => pct(r.distHi, 1), cls: 'num', hide: 'md' },
@@ -364,6 +476,7 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
                 { label: 'Change in OI', x: (r) => r.futOiChg, cell: (r) => compact(r.futOiChg), cls: 'num', hide: 'md' },
                 { label: 'Contracts', x: (r) => r.futVol, cell: (r) => int(r.futVol), cls: 'num', hide: 'md' },
                 { label: 'Build-up', x: (r) => r.futBuildup, cell: (r) => <Tag v={{ label: r.futBuildup, tone: buildupTone(r.futBuildup) }} />, str: true },
+                MWPL,
                 { label: 'Expiry', x: (r) => r.futExpiry, str: true, hide: 'md' },
                 MATCH,
               ]}
@@ -403,8 +516,8 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
             initialSort={{ i: 9, dir: 1 }}
             empty="No stocks."
             cols={[
-              SEC,
               SYM,
+              SEC,
               LTP,
               { label: 'EMA20', x: (r) => r.ema20, cell: (r) => price(r.ema20), cls: 'num', hide: 'md' },
               { label: 'EMA50', x: (r) => r.ema50, cell: (r) => price(r.ema50), cls: 'num', hide: 'md' },
@@ -425,7 +538,7 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
             key="swing"
           />
         )}
-        {view === 'heatmap' && <StockHeatmap rows={shown} onOpen={onOpen} ctx={ctx} />}
+        {view === 'heatmap' && <StockHeatmap rows={shown} sectors={sectors} onSector={onSector} onOpen={onOpen} ctx={ctx} />}
         {view === 'intraday' && (
           <Grid
             title="Intraday Scanner"
@@ -450,17 +563,58 @@ export default function Scanners({ rows, indices, settings, onOpen, meta }) {
             key="intraday"
           />
         )}
+        {view === 'patterns' && (
+          <>
+            <p className="small muted tab-note">ORB = first 15 minutes. Prev high / low = last session. NR7 = narrowest range of 7 days, inside bar = inside the day before: both often come before a big move.</p>
+            <Grid
+              title="Patterns and ORB"
+              ctx={ctx}
+              rows={shown.filter((r) => has(r.orbHigh) || r.nr7 || r.insideBar)}
+              onOpen={onOpen}
+              initialSort={{ i: 9, dir: -1 }}
+              empty="No intraday data yet."
+              cols={[
+                SYM,
+                LTP,
+                CHG,
+                { label: 'Gap', x: (r) => gapPct(r), cell: (r) => <Tag v={gapLabel(r)} />, hide: 'sm' },
+                { label: 'ORB High / Low', x: (r) => r.orbHigh, cell: (r) => `${price(r.orbHigh)} / ${price(r.orbLow)}`, cls: 'num', hide: 'md' },
+                { label: 'ORB', x: (r) => orbStatus(r).label, cell: (r) => <Tag v={orbStatus(r)} />, str: true },
+                { label: 'Prev Day High / Low', x: (r) => r.pdh, cell: (r) => `${price(r.pdh)} / ${price(r.pdl)}`, cls: 'num', hide: 'md' },
+                { label: 'Prev Day Range', x: (r) => pdStatus(r).label, cell: (r) => <Tag v={pdStatus(r)} />, str: true, hide: 'sm' },
+                { label: '20D Range', x: (r) => rangeBreak20(r).label, cell: (r) => <Tag v={rangeBreak20(r)} />, str: true, hide: 'md' },
+                { label: 'Break Score', x: (r) => breakScore(r).score, cell: (r) => <Tag v={breakScore(r)} /> },
+                { label: 'Patterns', x: (r) => patternTags(r).join(', '), cell: (r) => <span className="small">{patternTags(r).join(' · ') || '-'}</span>, str: true, hide: 'sm' },
+                DELIV,
+                MATCH,
+              ]}
+              key="patterns"
+            />
+          </>
+        )}
+        {view === 'fii' && <Participants p={meta.participants} />}
       </Card>
       <p className="small muted">
         Live: price, change, VWAP side, CPR zone, ATM strike and every signal move with each price tick. Indicators (RSI, EMA, MACD, VWAP) update with each data refresh,
         about every 30 minutes in market hours. Option chain, OI and futures: {eod}.
       </p>
 
+      {toasts.length > 0 && (
+        <div className="alert-toasts" role="status" aria-live="polite">
+          {toasts.map((t) => (
+            <div key={t.id} className={`alert-toast ${t.tone}`}>
+              <span>{t.text}</span>
+              <button onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))} aria-label="Dismiss">×</button>
+            </div>
+          ))}
+        </div>
+      )}
       {chainOf && <ChainModal symbol={chainOf} rows={enriched} indices={indices} onClose={() => setChainOf(null)} />}
     </>
   );
 }
 
+const shortDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 const num0 = (v) => (has(v) ? (Number.isInteger(v) ? int(v) : dec(v, 2)) : '-');
 const oiRange = (r) => (has(r.putOiSup) && has(r.callOiRes) ? `${num0(r.putOiSup)} - ${num0(r.callOiRes)}` : '-');
 
@@ -490,10 +644,6 @@ function BrkCell({ r, c }) {
   );
 }
 
-function cprLabel(r, c) {
-  const z = cprZone(r, c);
-  return !z ? '' : z.wide ? 'WIDE' : z.inside ? 'INSIDE' : z.above ? 'ABOVE' : 'BELOW';
-}
 function cprCell(r, c) {
   const l = cprLabel(r, c);
   if (!l) return '-';
@@ -515,8 +665,7 @@ function Setups({ rows, onOpen, ctx }) {
       .sort((a, b) => b.score - a.score)
       .map((r, i) => ({ ...r, rank: i + 1 }));
   const cols = (side) => [
-    { label: 'Rank', x: (r) => r.rank, cell: (r) => `#${r.rank}`, cls: 'num' },
-    SYM,
+    rankSym((r) => r.rank),
     SEC,
     { label: 'Setup Type', x: (r) => r.setup, str: true, hide: 'sm' },
     { label: 'Conviction', x: (r) => r.score, cell: (r) => <ScoreBar value={r.score} side={r.side} /> },
@@ -569,6 +718,8 @@ function Summary({ rows, stats, meta, onOpen, ctx }) {
     ['F&O stocks with OI', stats.fno],
     ['Long / short build-up', `${longB} / ${shortB}`],
     ['Settings condition matched', stats.matched, 'up-t'],
+    ['F&O ban (next session)', meta.ban?.length ? meta.ban.join(', ') : 'None', meta.ban?.length ? 'warn-t' : ''],
+    ['Near ban (MWPL 80%+)', rows.filter((r) => r.mwplPct >= 80 && !r.inBan).map((r) => r.s).join(', ') || 'None', 'warn-t'],
     ['Data file', meta.generatedAtIST],
   ];
   const top = rows.filter((r) => r.match.tone === 'up' || r.match.tone === 'down').sort((a, b) => b.score - a.score);
@@ -603,7 +754,7 @@ function Summary({ rows, stats, meta, onOpen, ctx }) {
   );
 }
 
-function StockHeatmap({ rows, onOpen, ctx }) {
+function StockHeatmap({ rows, sectors, onSector, onOpen, ctx }) {
   const [metric, setMetric] = useState('chg');
   const labels = { chg: 'Today', chg1w: '1 Week', chg1m: '1 Month' };
   const bySector = useMemo(() => {
@@ -647,17 +798,37 @@ function StockHeatmap({ rows, onOpen, ctx }) {
           </section>
         ))}
       </div>
+      <h3 className="sub">Sector summary</h3>
+      <Grid
+        title="Sector Summary"
+        ctx={ctx}
+        rows={sectors.map((x) => ({ ...x, s: x.sector }))}
+        onOpen={(x) => onSector(x.sector)}
+        initialSort={{ i: 3, dir: -1 }}
+        empty="No sectors."
+        cols={[
+          { label: 'Sector', x: (x) => x.sector, cell: (x) => <strong className="sym">{x.sector}</strong>, str: true, freeze: true },
+          { label: 'Stocks', x: (x) => x.count, cls: 'num' },
+          { label: 'Advancing', x: (x) => x.adv, cls: 'num', hide: 'sm' },
+          { label: 'Today % (avg)', x: (x) => x.chg, cell: (x) => <Change value={x.chg} /> },
+          { label: '1W %', x: (x) => x.chg1w, cell: (x) => <Change value={x.chg1w} d={1} />, hide: 'sm' },
+          { label: '1M %', x: (x) => x.chg1m, cell: (x) => <Change value={x.chg1m} d={1} />, hide: 'sm' },
+          { label: 'Bullish', x: (x) => x.bull, cell: (x) => <span className="up-t">{x.bull}</span>, cls: 'num' },
+          { label: 'Bearish', x: (x) => x.bear, cell: (x) => <span className="down-t">{x.bear}</span>, cls: 'num' },
+        ]}
+      />
+      <p className="small muted tab-note">Tap a sector to open its stocks in the Screener.</p>
       <h3 className="sub">Multi-timeframe table</h3>
       <Grid
         title="Sector Heatmap"
         ctx={ctx}
         rows={rows}
         onOpen={onOpen}
-        initialSort={{ i: 0, dir: 1 }}
+        initialSort={{ i: 1, dir: 1 }}
         empty="No stocks."
         cols={[
-          { label: 'Sector', x: (r) => r.sec, str: true },
           SYM,
+          { label: 'Sector', x: (r) => r.sec, str: true },
           NAME,
           LTP,
           { label: 'Today %', x: (r) => r.chg, cell: (r) => <Change value={r.chg} /> },
@@ -871,5 +1042,69 @@ function ChainModal({ symbol, rows, indices, onClose }) {
       <p className="small muted">Call writing (CE OI rising) caps the price; put writing (PE OI rising) supports it. MP = max pain. Shaded = in the money at the live price.</p>
       {has(spot) && row && <p className="small muted">ATM now: {num0(atmStrike(spot, row.s ? null : row.name, row.step))}</p>}
     </Modal>
+  );
+}
+
+const signed = (v) => (has(v) ? `${v > 0 ? '+' : ''}${compact(v)}` : '-');
+
+function Participants({ p }) {
+  if (!p?.data) return <Empty>Participant-wise OI is not in this data file yet.</Empty>;
+  const order = ['FII', 'DII', 'Pro', 'Client'].filter((k) => p.data[k]);
+  const fii = participantView(p.data.FII);
+  let read = null;
+  if (fii && has(fii.idxFutLongPct)) {
+    if (fii.idxFutLongPct >= 60) read = { text: `FIIs are net LONG in index futures (${fii.idxFutLongPct}% long). Supportive for NIFTY / BANKNIFTY.`, tone: 'up' };
+    else if (fii.idxFutLongPct <= 40) read = { text: `FIIs are net SHORT in index futures (only ${fii.idxFutLongPct}% long). Rallies may face selling.`, tone: 'down' };
+    else read = { text: `FIIs are balanced in index futures (${fii.idxFutLongPct}% long).`, tone: 'flat' };
+  }
+  return (
+    <>
+      <p className="small muted tab-note">NSE participant-wise open interest (contracts), session {p.date}. Small figures are the change vs the session before.</p>
+      {read && (
+        <p className={`fii-read ${toneClass(read.tone)}`}>
+          {read.text}
+          {has(fii.idxFutNetChg) ? ` Net index futures change: ${signed(fii.idxFutNetChg)} contracts.` : ''}
+        </p>
+      )}
+      <div className="part-grid">
+        {order.map((k) => {
+          const rec = p.data[k];
+          const v = participantView(rec);
+          const lines = [
+            ['Index futures', rec.idxFutLong, rec.idxFutShort, rec.chg?.idxFutLong, rec.chg?.idxFutShort, v.idxFutLongPct],
+            ['Stock futures', rec.stkFutLong, rec.stkFutShort, rec.chg?.stkFutLong, rec.chg?.stkFutShort, v.stkFutLongPct],
+            ['Index calls', rec.idxCallLong, rec.idxCallShort, rec.chg?.idxCallLong, rec.chg?.idxCallShort, null],
+            ['Index puts', rec.idxPutLong, rec.idxPutShort, rec.chg?.idxPutLong, rec.chg?.idxPutShort, null],
+          ];
+          return (
+            <div className="card part-card" key={k}>
+              <div className="row between">
+                <strong>{k}</strong>
+                <span className="muted small">long / short</span>
+              </div>
+              {lines.map(([label, lo, sh, dlo, dsh, pctLong]) => {
+                const tot = (lo || 0) + (sh || 0) || 1;
+                return (
+                  <div className="part-row" key={label}>
+                    <div className="row between small">
+                      <span>{label}</span>
+                      <span className="muted">{has(pctLong) ? `${pctLong}% long` : ''}</span>
+                    </div>
+                    <div className="ls-bar">
+                      <i className="l" style={{ width: `${((lo || 0) / tot) * 100}%` }} />
+                      <i className="s" style={{ width: `${((sh || 0) / tot) * 100}%` }} />
+                    </div>
+                    <div className="row between small">
+                      <span className="up-t">{compact(lo)} <em className="muted">{signed(dlo)}</em></span>
+                      <span className="down-t">{compact(sh)} <em className="muted">{signed(dsh)}</em></span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }

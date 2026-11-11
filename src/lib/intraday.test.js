@@ -74,3 +74,31 @@ test('index signal skips the CPR filter and uses the index strike step', () => {
   assert.equal(s.bias, 'BULLISH (CALL FAVORED)');
   assert.equal(s.signal, 'BUY');
 });
+
+import { gapPct, orbStatus, pdStatus, pivots, breakScore, participantView, rangeBreak20, patternTags } from './intraday.js';
+
+test('gap, ORB and previous-day range follow the live price', () => {
+  const r = { ltp: 105, dayOpen: 102, pdc: 100, orbHigh: 104, orbLow: 101, pdh: 103, pdl: 98, hi20: 104.5, lo20: 90, vwap: 103 };
+  assert.equal(gapPct(r), 2);
+  assert.equal(orbStatus(r).kind, 'up');
+  assert.equal(orbStatus({ ...r, ltp: 100 }).kind, 'down');
+  assert.equal(pdStatus(r).kind, 'up');
+  assert.equal(rangeBreak20(r).kind, 'up');
+  assert.equal(breakScore(r).label, 'STRONG BULL (4/4)');
+  assert.equal(orbStatus({ ltp: 1 }).kind, null);
+});
+
+test('classic pivots from previous high / low / close', () => {
+  const p = pivots({ pdh: 110, pdl: 90, pdc: 100 });
+  assert.deepEqual(p, { P: 100, R1: 110, S1: 90, R2: 120, S2: 80, R3: 130, S3: 70 });
+  assert.equal(pivots({ pdh: 1 }), null);
+});
+
+test('pattern tags and participant view', () => {
+  assert.deepEqual(patternTags({ nr7: true, insideBar: true, streak: 4 }), ['NR7', 'INSIDE BAR', '4 UP DAYS']);
+  const v = participantView({ idxFutLong: 52382, idxFutShort: 143123, idxCallLong: 10, idxPutLong: 4, chg: { idxFutLong: 3726, idxFutShort: -5949 } });
+  assert.equal(v.idxFutLongPct, 26.8);
+  assert.equal(v.idxFutNet, -90741);
+  assert.equal(v.idxFutNetChg, 9675);
+  assert.equal(v.idxOptBias, 6);
+});

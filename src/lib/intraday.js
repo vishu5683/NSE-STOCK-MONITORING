@@ -9,7 +9,7 @@ const has = (x) => typeof x === 'number' && Number.isFinite(x);
 const INDEX_STEP = { 'NIFTY 50': 50, 'BANK NIFTY': 100, SENSEX: 100 };
 
 // NSE strike gaps differ per stock; these bands match the client sheet on the stocks we compared.
-export function strikeStep(price, indexName) {
+function strikeStep(price, indexName) {
   if (indexName && INDEX_STEP[indexName]) return INDEX_STEP[indexName];
   if (price < 100) return 5;
   if (price < 250) return 10;
@@ -80,6 +80,11 @@ export function cprZone(r, c) {
   const wide = has(r.cprWidthPct) && r.cprWidthPct > (c.cprWidePct ?? 0.5);
   const inside = r.ltp >= r.cprBc && r.ltp <= r.cprTc;
   return { inside, wide, above: r.ltp > r.cprTc, below: r.ltp < r.cprBc };
+}
+
+export function cprLabel(r, c) {
+  const z = cprZone(r, c);
+  return !z ? '' : z.wide ? 'WIDE' : z.inside ? 'INSIDE' : z.above ? 'ABOVE' : 'BELOW';
 }
 
 /**
@@ -157,4 +162,83 @@ export function indexSignal(ix, c) {
   if (above && ix.ema9i > ix.ema15i) bias = 'BULLISH (CALL FAVORED)';
   else if (above === false && ix.ema9i < ix.ema15i) bias = 'BEARISH (PUT FAVORED)';
   return { ...intra, above, bias, atm: atmStrike(ix.ltp, ix.name, ix.step) };
+}
+
+// ---------- Patterns & levels (ORB, gap, previous-day range, pivots) ----------
+
+export function gapPct(r) {
+  return has(r.dayOpen) && has(r.pdc) && r.pdc > 0 ? Math.round((r.dayOpen / r.pdc - 1) * 10000) / 100 : null;
+}
+
+export function gapLabel(r) {
+  const g = gapPct(r);
+  if (!has(g)) return { label: '-', tone: 'flat' };
+  if (g >= 1) return { label: `GAP UP ${g.toFixed(2)}%`, tone: 'up' };
+  if (g <= -1) return { label: `GAP DOWN ${g.toFixed(2)}%`, tone: 'down' };
+  return { label: `FLAT OPEN ${g.toFixed(2)}%`, tone: 'flat' };
+}
+
+// 15-minute opening range breakout against the live price
+export function orbStatus(r) {
+  if (!has(r.orbHigh) || !has(r.orbLow)) return { label: '-', tone: 'flat', kind: null };
+  if (r.ltp > r.orbHigh) return { label: `ORB BREAKOUT (>${r.orbHigh})`, tone: 'up', kind: 'up' };
+  if (r.ltp < r.orbLow) return { label: `ORB BREAKDOWN (<${r.orbLow})`, tone: 'down', kind: 'down' };
+  return { label: 'INSIDE OPENING RANGE', tone: 'flat', kind: 'inside' };
+}
+
+export function pdStatus(r) {
+  if (!has(r.pdh) || !has(r.pdl)) return { label: '-', tone: 'flat', kind: null };
+  if (r.ltp > r.pdh) return { label: 'ABOVE PREV HIGH', tone: 'up', kind: 'up' };
+  if (r.ltp < r.pdl) return { label: 'BELOW PREV LOW', tone: 'down', kind: 'down' };
+  return { label: 'INSIDE PREV RANGE', tone: 'flat', kind: 'inside' };
+}
+
+export function rangeBreak20(r) {
+  if (has(r.hi20) && r.ltp > r.hi20) return { label: '20D HIGH BREAK', tone: 'up', kind: 'up' };
+  if (has(r.lo20) && r.ltp < r.lo20) return { label: '20D LOW BREAK', tone: 'down', kind: 'down' };
+  return { label: '-', tone: 'flat', kind: null };
+}
+
+export function patternTags(r) {
+  const t = [];
+  if (r.nr7) t.push('NR7');
+  if (r.insideBar) t.push('INSIDE BAR');
+  if (r.streak >= 3) t.push(`${r.streak} UP DAYS`);
+  if (r.streak <= -3) t.push(`${-r.streak} DOWN DAYS`);
+  return t;
+}
+
+// Classic floor pivots from the previous session (H, L, C)
+export function pivots(r) {
+  if (![r.pdh, r.pdl, r.pdc].every(has)) return null;
+  const { pdh: H, pdl: L, pdc: C } = r;
+  const P = (H + L + C) / 3;
+  const x = (v) => Math.round(v * 100) / 100;
+  return { P: x(P), R1: x(2 * P - L), S1: x(2 * P - H), R2: x(P + (H - L)), S2: x(P - (H - L)), R3: x(H + 2 * (P - L)), S3: x(L - 2 * (H - P)) };
+}
+
+// A combined intraday momentum read used by the Patterns tab: how many bullish / bearish breaks line up.
+export function breakScore(r) {
+  const parts = [orbStatus(r).kind, pdStatus(r).kind, rangeBreak20(r).kind, has(r.vwap) ? (r.ltp > r.vwap ? 'up' : 'down') : null];
+  const up = parts.filter((k) => k === 'up').length;
+  const down = parts.filter((k) => k === 'down').length;
+  if (up >= 3) return { label: `STRONG BULL (${up}/4)`, tone: 'up', score: up };
+  if (down >= 3) return { label: `STRONG BEAR (${down}/4)`, tone: 'down', score: -down };
+  if (up > down) return { label: `BULL TILT (${up}/4)`, tone: 'up', score: up - down };
+  if (down > up) return { label: `BEAR TILT (${down}/4)`, tone: 'down', score: up - down };
+  return { label: 'MIXED', tone: 'flat', score: 0 };
+}
+
+// FII / DII / Pro / Client positioning from participant-wise OI
+export function participantView(rec) {
+  if (!rec) return null;
+  const ratio = (a, b) => (has(a) && has(b) && a + b > 0 ? Math.round((a / (a + b)) * 1000) / 10 : null);
+  return {
+    idxFutLongPct: ratio(rec.idxFutLong, rec.idxFutShort),
+    stkFutLongPct: ratio(rec.stkFutLong, rec.stkFutShort),
+    idxFutNet: has(rec.idxFutLong) && has(rec.idxFutShort) ? rec.idxFutLong - rec.idxFutShort : null,
+    idxFutNetChg: rec.chg && has(rec.chg.idxFutLong) && has(rec.chg.idxFutShort) ? rec.chg.idxFutLong - rec.chg.idxFutShort : null,
+    // option buyers' bias on index options: call longs minus put longs
+    idxOptBias: has(rec.idxCallLong) && has(rec.idxPutLong) ? rec.idxCallLong - rec.idxPutLong : null,
+  };
 }

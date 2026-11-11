@@ -173,3 +173,23 @@ Mapped to the new **Scanners** tab (`src/components/Scanners.jsx`, rules in `src
 - Bhavcopy URLs: `nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip` (and `/cm/` for names). Use a plain User-Agent `nsestocks-pro-data/1.0`: a UA containing a URL is stalled by the NSE host (timeouts). Posted in the evening; the pipeline walks back up to 8 days. Option expiry = first one after the bhavcopy date.
 - Not done on purpose: the NSE live option-chain JSON API sits behind a bot check; scraping it was refused. Live intraday OI comes with Upstox.
 - Sheet lot sizes (8-Nov) differ from NSE now (e.g. HINDPETRO 1350 vs NSE 2025); NSE value wins.
+
+### 15c. R&D batch 2 (11-Nov-2026)
+More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain User-Agent, all optional):
+- F&O ban list `content/fo/fo_secban.csv` (dated file names 404 now) -> `inBan`, `meta.ban`, BAN chip everywhere.
+- MWPL `archives/nsccl/mwpl/combineoi_DDMMYYYY.zip` -> `mwplPct`, `noFresh` (95% = ban, 80%+ shown as near ban).
+- Delivery % `products/content/sec_bhavdata_full_DDMMYYYY.csv` (EQ series) -> `delivPct`, `delivQty`. Health check "Delivery % (NSE)".
+- Participant OI `content/nsccl/fao_participant_oi_DDMMYYYY.csv` (+ the session before for change) -> `meta.participants` -> new tab FII / DII.
+- Intraday adds `orbHigh/orbLow` (first three 5-min bars), `dayOpen`, `pdh/pdl/pdc`. Daily adds `nr7`, `insideBar`, `hi20/lo20`, `streak` (last complete session).
+- New tab Patterns & ORB (gap, ORB, prev-day range, 20D break, break score x/4, NR7 / inside bar / streak).
+- Stock popup: Key levels ladder (pivots R3..S3, prev high/low, ORB, VWAP, CPR, OI walls, max pain, live price slotted in), delivery, MWPL, PCR, build-up, IV, ATM.
+- Alerts toggle (localStorage `nsestocks.alerts`): toast + browser Notification when a stock newly matches, gives an intraday BUY/SELL, or breaks its ORB. Fires on data refresh / live tick while the page is open; no server push.
+- 10-Nov-2026 had no NSE files and no Yahoo bar (treated as a holiday by the data).
+
+### 15d. UI polish, live indicators, cleanup (11-Nov-2026)
+- Pro Sheet is the first nav item and the landing page (`#/` and unknown hashes open it). Nav: Pro Sheet, Dashboard, Screener, Reports, Admin.
+- The old Sectors tab is gone (duplicate). Its sector table is now "Sector summary" inside Pro Sheet > Sector Heatmap; tapping a sector opens the Screener filtered to it. Old `#/sectors` links land on Pro Sheet.
+- Sheet tables behave like Excel freeze panes: header row and Symbol column stay put (`.sheet-wrap`, column flag `freeze`). Zebra rows, rank folded into the symbol cell.
+- Phones: 3-column stat tiles, icon-only alerts button beside a full-width search, faded edges on the tab strip, active tab scrolled into view.
+- New `/api/intraday` (Vercel): Yahoo spark, 5 days of 5-minute closes, 20 symbols a call (~14 calls, ~0.7 s), cached 60 s. Returns EMA 9/15, RSI 14, MACD 12/26/9 per stock and index. Browser polls it every minute in market hours and overlays those fields (`applyIntraday` in live.js); VWAP, CPR, ORB, daily indicators and OI still come from the data file. Checked against pandas on the same moment: EMA within ~0.1, RSI within ~0.4.
+- Cleanup: removed dead `.login-wrap` CSS, unused exports made private, one shared `cprLabel` for page and Excel, Excel ATM uses the real strike gap.

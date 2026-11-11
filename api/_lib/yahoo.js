@@ -16,7 +16,7 @@ for (const symbol of Object.keys(instruments.stocks)) tickerToTarget.set(`${symb
 for (const [name, ticker] of Object.entries(INDEX_TICKERS)) tickerToTarget.set(ticker, { kind: 'index', name });
 const tickers = [...tickerToTarget.keys()];
 
-export class YahooError extends Error {
+class YahooError extends Error {
   constructor(message) {
     super(message);
     this.code = 'YAHOO_ERROR';

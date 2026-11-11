@@ -246,3 +246,42 @@ test('source order: when Upstox works it wins', async () => {
   const r = await call(sources.default, { headers: { authorization: `Bearer ${token}` } });
   assert.equal(r.json.source, 'upstox');
 });
+
+// ---------- /api/intraday: live 5-minute EMA / RSI / MACD ----------
+const intradayLib = await import('../api/_lib/intraday.js');
+const { default: intradayApi } = await import('../api/intraday.js');
+
+test('intraday indicators follow pandas ewm(adjust=False) and Wilder RSI', () => {
+  assert.deepEqual(intradayLib.emaSeries([10, 20], 3), [10, 15]);
+  assert.equal(intradayLib.rsiLast([1, 2, 3], 14), null);
+  const up = Array.from({ length: 30 }, (_, i) => 100 + i);
+  assert.equal(intradayLib.rsiLast(up), null); // no losses at all: undefined, not 100 made up
+  const zig = Array.from({ length: 40 }, (_, i) => 100 + (i % 2 ? 1 : -1) + i * 0.1);
+  const r = intradayLib.rsiLast(zig);
+  assert.ok(r > 50 && r < 70, `rsi ${r}`);
+  const ind = intradayLib.indicatorsFrom({ close: zig, timestamp: zig.map((_, i) => 1794368700 + i * 300) });
+  assert.equal(ind.iLtp, Math.round(zig.at(-1) * 100) / 100);
+  assert.ok(ind.ema9i > 0 && ind.ema15i > 0 && typeof ind.macdI === 'number');
+  assert.equal(intradayLib.indicatorsFrom({ close: [1, 2, 3] }), null);
+});
+
+test('intraday maps Yahoo tickers to symbols and indices, behind the same login', async () => {
+  intradayLib.resetIntradayCache();
+  const closes = Array.from({ length: 40 }, (_, i) => 200 + Math.sin(i) * 3);
+  const sym = stockKeys[0][0];
+  global.fetch = async (url) => {
+    const syms = decodeURIComponent(String(url).split('symbols=')[1].split('&')[0]).split(',');
+    const body = {};
+    for (const t of syms) if (t === `${sym}.NS` || t === '^NSEI') body[t] = { close: closes, timestamp: closes.map((_, i) => 1794368700 + i * 300) };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const denied = await call(intradayApi);
+  assert.equal(denied.status, 401);
+  const { token } = auth.issueToken();
+  const ok = await call(intradayApi, { headers: { authorization: `Bearer ${token}` } });
+  assert.equal(ok.status, 200);
+  assert.ok(ok.json.stocks[sym].ema9i > 0);
+  assert.ok(ok.json.indices['NIFTY 50'].rsiI > 0);
+  assert.equal(ok.json.count, 1);
+  assert.equal(ok.headers['cache-control'], 'private, no-store');
+});

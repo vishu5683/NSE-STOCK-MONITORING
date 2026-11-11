@@ -21,7 +21,7 @@ import os
 import sys
 import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -177,7 +177,29 @@ def build_row(df: pd.DataFrame, forming: bool) -> dict | None:
         trend = "SIDEWAYS"
 
     vi = -2 if forming else -1
+    # daily patterns on the last COMPLETE session
+    hc, lc = h.iloc[: len(h) + vi + 1], l.iloc[: len(l) + vi + 1]
+    rng = hc - lc
+    cc = c.iloc[: len(c) + vi + 1]
+    nr7 = bool(len(rng) >= 7 and rng.iloc[-1] <= rng.tail(7).min())
+    inside = bool(len(hc) >= 2 and hc.iloc[-1] <= hc.iloc[-2] and lc.iloc[-1] >= lc.iloc[-2])
+    hi20 = float(hc.iloc[-21:-1].max()) if len(hc) > 21 else None
+    lo20 = float(lc.iloc[-21:-1].min()) if len(lc) > 21 else None
+    streak = 0
+    diffs = cc.diff().tail(10).tolist()[::-1]
+    for dlt in diffs:
+        if dlt > 0 and streak >= 0:
+            streak += 1
+        elif dlt < 0 and streak <= 0:
+            streak -= 1
+        else:
+            break
     return {
+        "nr7": nr7,
+        "insideBar": inside,
+        "hi20": num(hi20),
+        "lo20": num(lo20),
+        "streak": streak,
         "open": num(df["Open"].iloc[-1]),
         "high": num(h.iloc[-1]),
         "low": num(l.iloc[-1]),
@@ -299,6 +321,26 @@ def main() -> int:
                     s["lot"] = lot_csv
                 fo_count += 1
 
+    # ---- more NSE public files: ban list, MWPL %, delivery %, participant OI ----
+    extras = {}
+    try:
+        from nse_extras import build_extras
+
+        print("Downloading NSE ban list, MWPL, delivery, participant OI ...")
+        extras = build_extras(date.fromisoformat(fo_date) if fo_date else now.date())
+    except Exception as exc:
+        print(f"WARN: NSE extras skipped: {exc}")
+    ban = set(extras.get("ban") or [])
+    deliv_n = 0
+    for s in stocks:
+        if extras.get("mwpl", {}).get(s["s"]):
+            s.update(extras["mwpl"][s["s"]])
+        if extras.get("delivery", {}).get(s["s"]):
+            s.update(extras["delivery"][s["s"]])
+            deliv_n += 1
+        if s["s"] in ban:
+            s["inBan"] = True
+
     indices = []
     for name, ysym in INDICES:
         df = frames.get(ysym)
@@ -328,6 +370,7 @@ def main() -> int:
         {"name": "Indices loaded", "ok": len(indices) >= 3, "detail": f"{len(indices)} of {len(INDICES)}"},
         {"name": "Volume data present", "ok": with_vol >= 0.9 * len(stocks), "detail": f"{with_vol} of {len(stocks)}"},
         {"name": "F&O data (NSE bhavcopy)", "ok": fo_count >= 150, "detail": f"{fo_count} stocks, session {fo_date or 'not found'}"},
+        {"name": "Delivery % (NSE)", "ok": deliv_n >= 0.8 * len(stocks), "detail": f"{deliv_n} of {len(stocks)}"},
         {"name": "Intraday (5-min) data", "ok": intraday_ok >= 0.8 * len(stocks), "detail": f"{intraday_ok} of {len(stocks)}"},
     ]
     if zero_ratio > 0.5:
@@ -341,6 +384,9 @@ def main() -> int:
             "marketPhase": phase,
             "lastTradingDate": ref_date.isoformat(),
             "foDate": fo_date,
+            "banDate": extras.get("banDate"),
+            "ban": sorted(ban),
+            "participants": extras.get("participants"),
             "barForming": bool(forming),
             "source": "Yahoo Finance (delayed ~15 min, unofficial) - daily candles",
             "universe": int(len(uni)),

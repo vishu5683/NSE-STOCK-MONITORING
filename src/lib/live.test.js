@@ -30,3 +30,19 @@ test('a new high moves the 52-week high to the live price', () => {
   assert.equal(next.hi52, 130);
   assert.equal(next.distHi, 0);
 });
+
+import { applyIntraday } from './live.js';
+
+test('live indicators overlay EMA / RSI / MACD but keep VWAP and CPR from the file', () => {
+  const data = { stocks: [{ s: 'A', vwap: 100, cprBc: 90, ema9i: 1, rsiI: 10, iAsOf: '2026-11-11 13:00' }, { s: 'B', ema9i: 5 }], indices: [{ name: 'NIFTY 50', ema9i: 1 }] };
+  const out = applyIntraday(data, { stocks: { A: { ema9i: 101, ema15i: 99, rsiI: 61.2, macdI: 0.5, macdIsig: 0.2, iAt: '2026-11-11T09:02:50.000Z' } }, indices: { 'NIFTY 50': { ema9i: 25000 } } });
+  assert.equal(out.stocks[0].ema9i, 101);
+  assert.equal(out.stocks[0].vwap, 100);
+  assert.equal(out.stocks[0].cprBc, 90);
+  assert.equal(out.stocks[0].iAsOf, '2026-11-11 14:32');
+  assert.equal(out.stocks[0].iLive, true);
+  assert.equal(out.stocks[1].ema9i, 5);
+  assert.equal(out.stocks[1].iLive, undefined);
+  assert.equal(out.indices[0].ema9i, 25000);
+  assert.equal(applyIntraday(data, null), data);
+});

@@ -78,11 +78,21 @@ def build_intraday(df: pd.DataFrame, daily: pd.DataFrame | None) -> dict | None:
     r = _rsi(c)
     out["rsiI"] = round(r, 1) if r is not None else None
 
+    # opening range: first 15 minutes (three 5-minute bars) of today
+    if len(today) >= 3:
+        first = today.iloc[:3]
+        out["orbHigh"] = round(float(first["High"].max()), 2)
+        out["orbLow"] = round(float(first["Low"].min()), 2)
+    out["dayOpen"] = round(float(today["Open"].iloc[0]), 2)
+
     # CPR from the last completed daily session before today's bar
     if daily is not None and len(daily) >= 2:
         d = daily[daily.index.date < last_day]
         if len(d):
             p = d.iloc[-1]
+            out["pdh"] = round(float(p["High"]), 2)
+            out["pdl"] = round(float(p["Low"]), 2)
+            out["pdc"] = round(float(p["Close"]), 2)
             z = cpr(float(p["High"]), float(p["Low"]), float(p["Close"]))
             out["cprBc"] = round(z["bc"], 2)
             out["cprTc"] = round(z["tc"], 2)

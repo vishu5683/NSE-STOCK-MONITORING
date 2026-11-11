@@ -3,7 +3,7 @@ import { Card, Change, Empty } from './ui.jsx';
 import { Sparkline } from './Charts.jsx';
 import { price, dec, pct, mult } from '../lib/fmt.js';
 
-export function IndexCards({ indices }) {
+function IndexCards({ indices }) {
   if (!indices.length) return null;
   return (
     <div className="index-grid">
@@ -25,7 +25,7 @@ export function IndexCards({ indices }) {
   );
 }
 
-export function Breadth({ b }) {
+function Breadth({ b }) {
   const advPct = b.total ? (b.adv / b.total) * 100 : 0;
   const decPct = b.total ? (b.dec / b.total) * 100 : 0;
   const mood = b.above50Pct >= 60 ? 'Broad strength' : b.above50Pct <= 40 ? 'Broad weakness' : 'Mixed market';
@@ -80,7 +80,7 @@ export const heatColor = (v, scale) => {
   return v >= 0 ? `rgba(34,197,94,${a})` : `rgba(239,68,68,${a})`;
 };
 
-export function SectorHeatmap({ sectors, onPick, compact = false }) {
+function SectorHeatmap({ sectors, onPick, compact = false }) {
   const [metric, setMetric] = useState('chg');
   const labels = { chg: '1D', chg1w: '1W', chg1m: '1M' };
   const values = sectors.map((s) => Math.abs(s[metric]));

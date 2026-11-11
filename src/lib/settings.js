@@ -4,7 +4,7 @@
 
 const KEY = 'nsestocks.settings.v1';
 
-export const FALLBACK = {
+const FALLBACK = {
   clientName: 'NSE Stocks Pro',
   tagline: 'F&O stock screener and market dashboard',
   accent: '#4f8cff',
