@@ -219,3 +219,7 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 - Desktop: icon tab buttons that wrap (no hidden overflow), and a title + one-line meaning above each sheet.
 - Live info banner is one line (details on tap). The Upstox "no key for" note only shows when Upstox is the source. On phones the matched list, the card title and the repeated tab name are hidden.
 - Checks: scratchpad e2e/ux3.mjs (13 tabs x phone + desktop: data present, no scroll traps, no sideways scroll, no NaN, wheel moves the page) and e2e/final.mjs (popups, Back, chain, downloads, pages, theme) against the live URL.
+
+### 15i. Dashboard v2, downloads off (11-Nov-2026)
+- Dashboard: Market Mood hero (mood from breadth, NIFTY change and NIFTY vs VWAP; six tiles that open the matching Pro Sheet tab: matched, intraday BUY / SELL, setups, FII index futures long %, F&O ban), index cards with VWAP side / PCR / ATM chips, heatmap without an inner scroll (top 8 + bottom 4, link to all), 'View all' on every list (opens the Pro Sheet tab via localStorage nsestocks.scanView), new lists 'Intraday signals now' and 'Opening range breakouts'.
+- src/lib/features.js DOWNLOADS_ENABLED = false: Reports tab and per-sheet Excel buttons hidden (code kept). The client tracks live on screen only. Admin config export stays.

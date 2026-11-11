@@ -29,6 +29,7 @@ import {
   participantView,
 } from '../lib/intraday.js';
 import { exportTable } from '../lib/exporters.js';
+import { DOWNLOADS_ENABLED } from '../lib/features.js';
 
 // Same tabs, same order as the client's Google Sheet.
 const VIEWS = [
@@ -162,9 +163,11 @@ function Grid({ rows, cols, initialSort, onOpen, empty, title, ctx }) {
           </select>
         </label>
       )}
-      <button className="btn ghost sm" onClick={doExport} disabled={busy}>
-        {busy ? 'Preparing…' : phone ? '⬇ Excel' : '⬇ Excel (this tab)'}
-      </button>
+      {DOWNLOADS_ENABLED && (
+        <button className="btn ghost sm" onClick={doExport} disabled={busy}>
+          {busy ? 'Preparing…' : phone ? '⬇ Excel' : '⬇ Excel (this tab)'}
+        </button>
+      )}
     </div>
   );
   const more = list.length > limit && (

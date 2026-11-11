@@ -9,6 +9,7 @@ import Dashboard from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
 import Scanners from './components/Scanners.jsx';
 import Reports from './components/Reports.jsx';
+import { DOWNLOADS_ENABLED } from './lib/features.js';
 import Admin from './components/Admin.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
 import { isAdmin } from './lib/auth.js';
@@ -18,7 +19,7 @@ const TABS = [
   { id: 'scanners', label: 'Pro Sheet', icon: 'M4 18l5-6 4 3 7-9M4 4v16h16' },
   { id: 'dashboard', label: 'Dashboard', icon: 'M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z' },
   { id: 'screener', label: 'Screener', icon: 'M3 5h18l-7 8v6l-4 2v-8z' },
-  { id: 'reports', label: 'Reports', icon: 'M12 3v12m0 0l-5-5m5 5l5-5M4 21h16' },
+  ...(DOWNLOADS_ENABLED ? [{ id: 'reports', label: 'Reports', icon: 'M12 3v12m0 0l-5-5m5 5l5-5M4 21h16' }] : []),
   { id: 'admin', label: 'Admin', icon: 'M7 10V7a5 5 0 0110 0v3M5 10h14v11H5z' },
 ];
 const REFRESH_MS = 10 * 60 * 1000;
@@ -262,6 +263,14 @@ export default function App() {
   const ctx = { rows, indices: book.indices, sectors, breadth, meta, settings };
   const liveOn = Boolean(live?.connected);
   const watched = picked ? (settings.watchlist || []).includes(picked.s) : false;
+  const openSheet = (view) => {
+    try {
+      localStorage.setItem('nsestocks.scanView', view);
+    } catch {
+      /* ignore */
+    }
+    go('scanners');
+  };
   const openSector = (sec) => {
     setSectorFilter(sec);
     go('screener');
@@ -357,12 +366,12 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'dashboard' && <Dashboard rows={rows} indices={book.indices} breadth={breadth} sectors={sectors} onOpen={setPicked} onGoScreener={openSector} />}
+        {tab === 'dashboard' && <Dashboard rows={rows} indices={book.indices} breadth={breadth} sectors={sectors} onOpen={setPicked} onGoScreener={openSector} onGoSheet={openSheet} settings={settings} meta={meta} />}
         {tab === 'scanners' && <Scanners rows={rows} indices={book.indices} sectors={sectors} settings={settings} onOpen={setPicked} onSector={openSector} meta={meta} />}
         {tab === 'screener' && (
           <Screener rows={rows} sectors={sectors} initialSector={sectorFilter} watchlist={settings.watchlist || []} onOpen={setPicked} onToggleWatch={toggleWatch} />
         )}
-        {tab === 'reports' && <Reports ctx={ctx} />}
+        {DOWNLOADS_ENABLED && tab === 'reports' && <Reports ctx={ctx} />}
         {tab === 'admin' && <Admin settings={settings} onChange={updateSettings} meta={meta} universe={book.stocks.map((s) => s.s)} stocks={book.stocks} />}
       </main>
 
