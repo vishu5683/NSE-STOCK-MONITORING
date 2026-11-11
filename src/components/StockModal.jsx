@@ -66,6 +66,7 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
   const plan = s.plan;
   const candles = useCandles(s.s);
   const [view, setView] = useState('today');
+  const [wide] = useState(() => typeof window === 'undefined' || !window.matchMedia || window.matchMedia('(min-width: 681px)').matches);
   const showToday = view === 'today' && candles?.bars?.length > 1;
   const dayLevels = [
     { label: 'ORB H', value: s.orbHigh, color: 'var(--up)' },
@@ -83,7 +84,7 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
       ]
     : [];
   return (
-    <Modal onClose={onClose} label={`${s.s} details`}>
+    <Modal onClose={onClose} label={`${s.s} details`} title={`${s.s} · ₹${price(s.ltp)} · ${isNum(s.chg) ? `${s.chg > 0 ? '+' : ''}${s.chg.toFixed(2)}%` : ''}`}>
       <div className="modal-head">
         <div>
           <h2>
@@ -130,6 +131,31 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
         <PriceChart data={s.spark} levels={levels} />
       )}
 
+      {plan ? (
+        <div className="plan">
+          <h3>{s.side === 'BULL' ? 'Long' : 'Short'} trade idea (rule-based)</h3>
+          <div className="grid-stats">
+            <Stat label="Entry">₹{price(plan.entry)}</Stat>
+            <Stat label="Stop loss">₹{price(plan.stop)} <span className="muted">({dec(plan.riskPct)}% risk)</span></Stat>
+            <Stat label={`Target 1 (${plan.rr1}R)`}>₹{price(plan.t1)}</Stat>
+            <Stat label={`Target 2 (${plan.rr2}R)`}>₹{price(plan.t2)}</Stat>
+          </div>
+          <p className="muted small">Stop loss uses ATR. Levels are a mechanical starting point, not advice. Check position size and your own plan.</p>
+        </div>
+      ) : (
+        <p className="muted small">No setup matches the current screener settings for this stock.</p>
+      )}
+
+      <Levels s={s} />
+
+      <div className="range-row">
+        <span className="muted">52W low ₹{price(s.lo52)}</span>
+        <RangeBar low={s.lo52} high={s.hi52} value={s.ltp} />
+        <span className="muted">52W high ₹{price(s.hi52)}</span>
+      </div>
+
+      <details className="more-stats" open={wide}>
+        <summary>All indicators</summary>
       <div className="grid-stats">
         <Stat label="1W / 1M">
           <Change value={s.chg1w} /> / <Change value={s.chg1m} />
@@ -173,29 +199,7 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
           <ScoreBar value={s.score} />
         </Stat>
       </div>
-
-      <Levels s={s} />
-
-      <div className="range-row">
-        <span className="muted">52W low ₹{price(s.lo52)}</span>
-        <RangeBar low={s.lo52} high={s.hi52} value={s.ltp} />
-        <span className="muted">52W high ₹{price(s.hi52)}</span>
-      </div>
-
-      {plan ? (
-        <div className="plan">
-          <h3>{s.side === 'BULL' ? 'Long' : 'Short'} trade idea (rule-based)</h3>
-          <div className="grid-stats">
-            <Stat label="Entry">₹{price(plan.entry)}</Stat>
-            <Stat label="Stop loss">₹{price(plan.stop)} <span className="muted">({dec(plan.riskPct)}% risk)</span></Stat>
-            <Stat label={`Target 1 (${plan.rr1}R)`}>₹{price(plan.t1)}</Stat>
-            <Stat label={`Target 2 (${plan.rr2}R)`}>₹{price(plan.t2)}</Stat>
-          </div>
-          <p className="muted small">Stop loss uses ATR. Levels are a mechanical starting point, not advice. Check position size and your own plan.</p>
-        </div>
-      ) : (
-        <p className="muted small">No setup matches the current screener settings for this stock.</p>
-      )}
+      </details>
     </Modal>
   );
 }

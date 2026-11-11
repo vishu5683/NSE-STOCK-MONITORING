@@ -221,7 +221,7 @@ function Panel({ settings, onChange, meta, universe, stocks, onLogout }) {
             <div className="stat"><span>Last trading date</span><strong>{meta.lastTradingDate}</strong></div>
             <div className="stat"><span>File generated</span><strong>{meta.generatedAtIST}</strong><small className="muted">{ageText(meta.generatedAt)}</small></div>
             <div className="stat"><span>Loaded / universe</span><strong>{meta.loaded} / {meta.universe}</strong></div>
-            <div className="stat"><span>Market phase</span><strong>{meta.marketPhase}</strong></div>
+            <div className="stat"><span>Market phase (when the file was built)</span><strong>{meta.marketPhase}</strong></div>
           </div>
           {meta.health?.length > 0 && (
             <ul className="health">

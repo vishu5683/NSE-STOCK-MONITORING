@@ -136,3 +136,17 @@ export function marketOpenNow(now = new Date()) {
 }
 
 export const pollMs = (now = new Date()) => (marketOpenNow(now) ? 5000 : 60000);
+
+// Market status from the clock (IST) and the newest live tick, so a stale data file never says "OPEN" at night.
+export function marketPhaseNow(now = new Date(), lastTickIso = null) {
+  const ist = new Date(now.getTime() + 5.5 * 3600 * 1000);
+  const day = ist.getUTCDay();
+  const m = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  if (day === 0 || day === 6) return { label: 'MARKET CLOSED (weekend)', open: false };
+  if (m < 9 * 60) return { label: 'MARKET CLOSED (opens 09:15)', open: false };
+  if (m < 9 * 60 + 15) return { label: 'PRE-OPEN', open: false };
+  if (m >= 15 * 60 + 30) return { label: 'MARKET CLOSED', open: false };
+  const tick = lastTickIso ? new Date(lastTickIso).getTime() : NaN;
+  if (Number.isFinite(tick) && now.getTime() - tick > 20 * 60 * 1000 && m > 9 * 60 + 40) return { label: 'NO LIVE TICKS (exchange holiday?)', open: false };
+  return { label: 'MARKET OPEN', open: true };
+}

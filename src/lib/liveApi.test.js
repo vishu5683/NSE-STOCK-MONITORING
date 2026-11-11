@@ -17,3 +17,15 @@ test('market is closed early morning, evening and on weekends', () => {
   assert.equal(marketOpenNow(ist(11, 0, '2026-11-14')), false); // Saturday
   assert.equal(pollMs(ist(18, 0)), 60000);
 });
+
+import { marketPhaseNow } from './liveApi.js';
+
+test('market phase follows the IST clock and the last live tick', () => {
+  const at = (iso) => new Date(iso);
+  assert.equal(marketPhaseNow(at('2026-11-14T06:00:00Z')).label, 'MARKET CLOSED (weekend)'); // Saturday
+  assert.equal(marketPhaseNow(at('2026-11-11T03:00:00Z')).label, 'MARKET CLOSED (opens 09:15)'); // 08:30 IST
+  assert.equal(marketPhaseNow(at('2026-11-11T03:35:00Z')).label, 'PRE-OPEN'); // 09:05
+  assert.equal(marketPhaseNow(at('2026-11-11T06:00:00Z'), '2026-11-11T05:59:50Z').open, true); // 11:30, fresh tick
+  assert.equal(marketPhaseNow(at('2026-11-11T06:00:00Z'), '2026-11-10T09:59:00Z').label, 'NO LIVE TICKS (exchange holiday?)');
+  assert.equal(marketPhaseNow(at('2026-11-11T10:05:00Z')).label, 'MARKET CLOSED'); // 15:35
+});

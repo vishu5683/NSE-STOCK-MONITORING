@@ -77,7 +77,7 @@ export default function LoginScreen({ name, tagline, onDone }) {
         <button className="btn primary block signin-btn" type="submit" disabled={!pw || locked || busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
-        <p className="signin-foot">NSE F&amp;O screener · delayed data · not investment advice</p>
+        <p className="signin-foot">NSE F&amp;O screener · live market data · not investment advice</p>
       </form>
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { pct, tone } from '../lib/fmt.js';
 
 export function Change({ value, d = 2 }) {
@@ -29,24 +29,64 @@ export function Card({ title, right, children, className = '' }) {
   );
 }
 
-export function Modal({ onClose, children, label }) {
+// Popup: a fixed top bar (title + close) that never scrolls away, a scrolling body,
+// Escape / backdrop / phone Back button / swipe-down on the handle all close it.
+export function Modal({ onClose, children, label, title }) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const drag = useRef(null);
+  const sheet = useRef(null);
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    const onKey = (e) => e.key === 'Escape' && closeRef.current();
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // phone Back closes the popup instead of leaving the page
+    let poppedByBack = false;
+    const onPop = () => {
+      if (window.history.state?.nsestocksModal) return; // still on a popup entry (dev double-mount)
+      poppedByBack = true;
+      closeRef.current();
+    };
+    try {
+      window.history.pushState({ nsestocksModal: true }, '');
+      window.addEventListener('popstate', onPop);
+    } catch {
+      /* history not available */
+    }
     return () => {
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('popstate', onPop);
       document.body.style.overflow = prev;
+      if (!poppedByBack && window.history.state?.nsestocksModal) window.history.back();
     };
-  }, [onClose]);
+  }, []);
+  const onTouchStart = (e) => {
+    drag.current = { y: e.touches[0].clientY, dy: 0 };
+  };
+  const onTouchMove = (e) => {
+    if (!drag.current || !sheet.current) return;
+    drag.current.dy = Math.max(0, e.touches[0].clientY - drag.current.y);
+    sheet.current.style.transform = `translateY(${drag.current.dy}px)`;
+  };
+  const onTouchEnd = () => {
+    if (!drag.current || !sheet.current) return;
+    const far = drag.current.dy > 90;
+    sheet.current.style.transform = '';
+    drag.current = null;
+    if (far) closeRef.current();
+  };
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={label}>
-        <button className="modal-close" onClick={onClose} aria-label="Close">
-          ×
-        </button>
-        {children}
+      <div className="modal" role="dialog" aria-modal="true" aria-label={label} ref={sheet}>
+        <div className="modal-bar" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+          <span className="modal-handle" aria-hidden="true" />
+          <strong className="modal-title">{title || label}</strong>
+          <button className="modal-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
       </div>
     </div>
   );

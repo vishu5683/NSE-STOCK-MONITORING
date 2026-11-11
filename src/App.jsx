@@ -3,7 +3,7 @@ import { loadSettings, saveSettings } from './lib/settings.js';
 import { analyseAll, marketBreadth, sectorStats } from './lib/signals.js';
 import { ageText, hoursSince } from './lib/fmt.js';
 import { applyBook, applyIntraday } from './lib/live.js';
-import { fetchLive, fetchIntraday, probe, pollMs, hasToken, clearToken, marketOpenNow } from './lib/liveApi.js';
+import { fetchLive, fetchIntraday, probe, pollMs, hasToken, clearToken, marketOpenNow, marketPhaseNow } from './lib/liveApi.js';
 import { logout, LOGIN_ENABLED } from './lib/auth.js';
 import Dashboard from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
@@ -22,6 +22,13 @@ const TABS = [
   { id: 'admin', label: 'Admin', icon: 'M7 10V7a5 5 0 0110 0v3M5 10h14v11H5z' },
 ];
 const REFRESH_MS = 10 * 60 * 1000;
+
+// newest quote time in the live payload (to spot a holiday: clock says open, no ticks)
+const newestTick = (live) => {
+  let best = null;
+  for (const q of Object.values(live?.quotes || {})) if (q?.ts && (!best || q.ts > best)) best = q.ts;
+  return best;
+};
 
 const tabFromHash = () => {
   const id = window.location.hash.replace('#/', '');
@@ -300,7 +307,7 @@ export default function App() {
       <main className="content">
         <div className="data-strip">
           <span className={`dot ${liveOn ? 'ok' : stale ? 'warn' : 'ok'}`} />{' '}
-          {liveOn ? `${live.source === 'yahoo' ? 'Live (Yahoo)' : 'Upstox live'} · ${ageText(live.updatedAt) || 'now'}` : `Data ${meta.lastTradingDate} · updated ${ageText(meta.generatedAt)}`} · {meta.marketPhase}
+          {liveOn ? `${live.source === 'yahoo' ? 'Live (Yahoo)' : 'Upstox live'} · ${ageText(live.updatedAt) || 'now'}` : `Data ${meta.lastTradingDate} · updated ${ageText(meta.generatedAt)}`} · {marketPhaseNow(new Date(), liveOn ? newestTick(live) : null).label}
         </div>
         {import.meta.env.DEV && live && !live.authed && (
           <div className="banner warn">

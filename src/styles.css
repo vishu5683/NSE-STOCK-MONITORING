@@ -443,3 +443,30 @@ h3.sub { margin: 14px 0 8px; }
 
 .chart-toggle { justify-self: start; }
 .chart-legend { margin: -6px 0 0; }
+
+/* ---- popup v2: fixed bar, scrolling body ---- */
+.modal { display: flex; flex-direction: column; overflow: hidden; padding: 0; gap: 0; }
+.modal-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 20px; border-bottom: 1px solid var(--line); background: var(--card); position: relative; flex: none; }
+.modal-title { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal-close { position: static; width: 36px; height: 36px; border-radius: 10px; background: var(--card2); border: 1px solid var(--line); color: var(--text); font-size: 22px; line-height: 1; display: grid; place-items: center; flex: none; }
+.modal-close:hover { background: color-mix(in srgb, var(--down) 18%, var(--card2)); }
+.modal-handle { display: none; }
+.modal-body { overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 20px; display: grid; gap: 14px; -webkit-overflow-scrolling: touch; }
+.modal-head { padding-right: 0; }
+@media (max-width: 680px) {
+  .modal { max-height: 94dvh; transition: transform 0.18s ease-out; }
+  .modal-bar { padding: 14px 12px 10px 16px; touch-action: none; }
+  .modal-handle { display: block; position: absolute; top: 5px; left: 50%; width: 42px; height: 4px; margin-left: -21px; border-radius: 4px; background: var(--line); }
+  .modal-body { padding: 14px 14px calc(18px + env(safe-area-inset-bottom)); }
+}
+.more-stats { display: grid; gap: 10px; }
+.more-stats > summary { cursor: pointer; font-weight: 700; padding: 10px 12px; border-radius: 10px; background: var(--card2); list-style: none; }
+.more-stats > summary::after { content: ' ▾'; color: var(--muted); }
+.more-stats[open] > summary::after { content: ' ▴'; }
+.more-stats[open] > summary { margin-bottom: 10px; }
+/* the scrolling popup body must not shrink its children (grid/flex would squash the SVG charts) */
+.modal-body { display: block; }
+.modal-body > * + * { margin-top: 14px; }
+.modal-body > .chart-legend { margin-top: 6px; }
+.modal-body .price-chart { display: block; }
+.modal-body > .seg { display: inline-flex; }
