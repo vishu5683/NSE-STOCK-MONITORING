@@ -595,8 +595,8 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
         {view === 'fii' && <Participants p={meta.participants} />}
       </Card>
       <p className="small muted">
-        Live: price, change, VWAP side, CPR zone, ATM strike and every signal move with each price tick. Indicators (RSI, EMA, MACD, VWAP) update with each data refresh,
-        about every 30 minutes in market hours. Option chain, OI and futures: {eod}.
+        Live: price, change, VWAP side, CPR zone, ATM strike and every signal move with each price tick (seconds). Intraday VWAP, EMA 9/15, RSI, MACD, opening range and CPR
+        refresh every 2 minutes on the live site. Daily indicators update with the data file. Option chain, OI and futures: {eod}.
       </p>
 
       {toasts.length > 0 && (

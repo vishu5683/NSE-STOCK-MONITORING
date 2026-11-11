@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, Change, SideBadge, ScoreBar } from './ui.jsx';
-import { PriceChart, RangeBar } from './Charts.jsx';
+import { PriceChart, RangeBar, CandleChart } from './Charts.jsx';
+import { fetchCandles, marketOpenNow } from '../lib/liveApi.js';
 import { price, dec, mult, int } from '../lib/fmt.js';
 import { weeklyLabel, monthlyLabel, breakoutLabel } from '../lib/signals.js';
 import { pivots, orbStatus, pdStatus, gapLabel, patternTags, pcrSentiment, atmFor } from '../lib/intraday.js';
@@ -40,8 +41,39 @@ const Stat = ({ label, children }) => (
   </div>
 );
 
+// Today's candles, refreshed every minute while the popup is open and the market is open
+function useCandles(symbol) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let off = false;
+    let timer = null;
+    const load = async () => {
+      const d = await fetchCandles(symbol);
+      if (off) return;
+      if (d) setData(d);
+      if (marketOpenNow()) timer = setTimeout(load, 60000);
+    };
+    load();
+    return () => {
+      off = true;
+      clearTimeout(timer);
+    };
+  }, [symbol]);
+  return data;
+}
+
 export default function StockModal({ stock: s, onClose, watched, onToggleWatch }) {
   const plan = s.plan;
+  const candles = useCandles(s.s);
+  const [view, setView] = useState('today');
+  const showToday = view === 'today' && candles?.bars?.length > 1;
+  const dayLevels = [
+    { label: 'ORB H', value: s.orbHigh, color: 'var(--up)' },
+    { label: 'ORB L', value: s.orbLow, color: 'var(--down)' },
+    { label: 'PDH', value: s.pdh, color: 'var(--muted)' },
+    { label: 'PDL', value: s.pdl, color: 'var(--muted)' },
+    ...(plan ? [{ label: 'SL', value: plan.stop, color: 'var(--down)' }, { label: 'T1', value: plan.t1, color: 'var(--up)' }] : []),
+  ];
   const levels = plan
     ? [
         { label: 'Entry', value: plan.entry, color: 'var(--accent)' },
@@ -77,7 +109,26 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
         </button>
       </div>
 
-      <PriceChart data={s.spark} levels={levels} />
+      {candles?.bars?.length > 1 && (
+        <div className="seg chart-toggle" role="tablist" aria-label="Chart period">
+          <button className={view === 'today' ? 'on' : ''} onClick={() => setView('today')} role="tab" aria-selected={view === 'today'}>
+            Today 5-min
+          </button>
+          <button className={view === '60d' ? 'on' : ''} onClick={() => setView('60d')} role="tab" aria-selected={view === '60d'}>
+            60 days
+          </button>
+        </div>
+      )}
+      {showToday ? (
+        <>
+          <CandleChart bars={candles.bars} levels={dayLevels} cpr={isNum(s.cprBc) ? { bc: s.cprBc, tc: s.cprTc } : null} />
+          <p className="muted small chart-legend">
+            Candles {candles.day} · blue line = VWAP{candles.vwapProxy ? ' (no volume, average price)' : ''} {isNum(candles.bars.at(-1)[6]) ? price(candles.bars.at(-1)[6]) : ''} · shaded band = CPR · ORB = first 15 min · PDH / PDL = previous day
+          </p>
+        </>
+      ) : (
+        <PriceChart data={s.spark} levels={levels} />
+      )}
 
       <div className="grid-stats">
         <Stat label="1W / 1M">

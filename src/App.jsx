@@ -317,7 +317,7 @@ export default function App() {
               ? `Prices from Yahoo Finance (${live.mapped} symbols, unofficial feed, usually within a minute for NSE stocks, SENSEX about 15 minutes late).`
               : `Upstox live prices are on (${live.mapped} symbols).`}{' '}
             {intra?.count
-              ? `Intraday EMA 9/15, RSI and MACD are live for ${intra.count} stocks (5-minute candles, refreshed every minute). VWAP, CPR, daily RSI / ADX and OI come from the last data refresh.`
+              ? `Intraday VWAP, EMA 9/15, RSI, MACD, opening range and CPR are live for ${intra.count} stocks (5-minute candles, refreshed every 2 minutes). Daily RSI / ADX / EMA and NSE OI come from the last data refresh.`
               : 'RSI, EMA, ADX, VWAP and volume spike come from the last data refresh; VWAP side, CPR zone, ATM strike and scanner signals follow the live price.'}
             {live.unmapped?.length > 0 ? ` No Upstox key for: ${live.unmapped.join(', ')}.` : ''}
             {live.stale ? ` Showing the last good prices: ${live.warning}` : ''}

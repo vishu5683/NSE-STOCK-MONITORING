@@ -116,6 +116,17 @@ export async function fetchIntraday() {
   }
 }
 
+// Today's 5-minute candles for one symbol (stock popup). null on static hosting or any failure.
+export async function fetchCandles(symbol) {
+  const token = read();
+  try {
+    const { res, body } = await jsonFetch(`./api/candles?s=${encodeURIComponent(symbol)}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 10000);
+    return res.ok && Array.isArray(body?.bars) ? body : null;
+  } catch {
+    return null;
+  }
+}
+
 // NSE cash session in IST, Mon-Fri 09:15-15:30. Poll fast while it is open, slowly otherwise.
 export function marketOpenNow(now = new Date()) {
   const ist = new Date(now.getTime() + 5.5 * 3600 * 1000);

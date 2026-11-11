@@ -44,17 +44,25 @@ export function applyBook(data, live) {
   };
 }
 
-// Overlay the server's live 5-minute indicators (/api/intraday) on the rows. VWAP / CPR / ORB stay from the data file.
-const IND_KEYS = ['ema9i', 'ema15i', 'rsiI', 'macdI', 'macdIsig'];
+// Overlay the server's live intraday layer (/api/intraday) on the rows: 5-minute EMA / RSI / MACD, VWAP,
+// opening range, day open, previous session and CPR. Daily indicators and NSE end-of-day data stay from the file.
+const IND_KEYS = ['ema9i', 'ema15i', 'rsiI', 'macdI', 'macdIsig', 'vwap', 'dayOpen', 'orbHigh', 'orbLow', 'iBars', 'pdh', 'pdl', 'pdc', 'cprPivot', 'cprBc', 'cprTc', 'cprWidthPct'];
 const istStamp = (iso) => {
   const d = new Date(new Date(iso).getTime() + 330 * 60000);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 16).replace('T', ' ');
 };
 
+// Previous-session levels: the data file has the official daily candle, the live layer rebuilds them from
+// 5-minute bars (a few paise off). Use the live ones only when the file is from an older session.
+const PREV_KEYS = new Set(['pdh', 'pdl', 'pdc', 'cprPivot', 'cprBc', 'cprTc', 'cprWidthPct']);
+
 function overlay(row, ind) {
   if (!ind) return row;
   const next = { ...row };
-  for (const k of IND_KEYS) if (isNum(ind[k])) next[k] = ind[k];
+  const liveDay = ind.iAt ? istStamp(ind.iAt)?.slice(0, 10) : null;
+  const fileIsToday = Boolean(liveDay && row.iAsOf && row.iAsOf.slice(0, 10) === liveDay && isNum(row.pdc));
+  for (const k of IND_KEYS) if (isNum(ind[k]) && !(fileIsToday && PREV_KEYS.has(k))) next[k] = ind[k];
+  if (ind.vwapProxy) next.vwapProxy = true;
   if (ind.iAt) next.iAsOf = istStamp(ind.iAt) || row.iAsOf;
   next.iLive = true;
   return next;

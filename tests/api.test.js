@@ -251,37 +251,71 @@ test('source order: when Upstox works it wins', async () => {
 const intradayLib = await import('../api/_lib/intraday.js');
 const { default: intradayApi } = await import('../api/intraday.js');
 
-test('intraday indicators follow pandas ewm(adjust=False) and Wilder RSI', () => {
+test('intraday layer: EMA / RSI follow pandas, VWAP / ORB / CPR from the bars', () => {
   assert.deepEqual(intradayLib.emaSeries([10, 20], 3), [10, 15]);
   assert.equal(intradayLib.rsiLast([1, 2, 3], 14), null);
-  const up = Array.from({ length: 30 }, (_, i) => 100 + i);
-  assert.equal(intradayLib.rsiLast(up), null); // no losses at all: undefined, not 100 made up
-  const zig = Array.from({ length: 40 }, (_, i) => 100 + (i % 2 ? 1 : -1) + i * 0.1);
-  const r = intradayLib.rsiLast(zig);
-  assert.ok(r > 50 && r < 70, `rsi ${r}`);
-  const ind = intradayLib.indicatorsFrom({ close: zig, timestamp: zig.map((_, i) => 1794368700 + i * 300) });
-  assert.equal(ind.iLtp, Math.round(zig.at(-1) * 100) / 100);
-  assert.ok(ind.ema9i > 0 && ind.ema15i > 0 && typeof ind.macdI === 'number');
-  assert.equal(intradayLib.indicatorsFrom({ close: [1, 2, 3] }), null);
+  assert.equal(intradayLib.rsiLast(Array.from({ length: 30 }, (_, i) => 100 + i)), null); // no losses: undefined, not a made-up 100
+  // yesterday 2026-11-10 (IST) 30 bars, today 2026-11-11 6 bars; 09:15 IST = 03:45 UTC
+  const day = (iso, n, base) =>
+    Array.from({ length: n }, (_, i) => ({ t: Date.parse(iso) / 1000 + i * 300, o: base + i, h: base + i + 2, l: base + i - 1, c: base + i + 1, v: 100 }));
+  const bars = [...day('2026-11-10T03:45:00Z', 30, 100), ...day('2026-11-11T03:45:00Z', 6, 140)];
+  const x = intradayLib.indicatorsFrom(bars);
+  assert.equal(x.pdh, 131); // 100 + 29 + 2
+  assert.equal(x.pdl, 99);
+  assert.equal(x.pdc, 130);
+  assert.equal(x.dayOpen, 140);
+  assert.equal(x.orbHigh, 144); // first three bars of today: highs 142, 143, 144
+  assert.equal(x.orbLow, 139);
+  assert.equal(x.iBars, 6);
+  const typ = [0, 1, 2, 3, 4, 5].map((i) => (140 + i + 2 + 140 + i - 1 + 140 + i + 1) / 3);
+  assert.equal(x.vwap, Math.round((typ.reduce((a, b) => a + b, 0) / 6) * 100) / 100);
+  const P = (131 + 99 + 130) / 3;
+  assert.equal(x.cprPivot, Math.round(P * 100) / 100);
+  assert.equal(x.vwapProxy, undefined);
+  assert.equal(intradayLib.indicatorsFrom(bars, { index: true }).vwapProxy, true);
+  assert.equal(intradayLib.indicatorsFrom(bars.slice(0, 5)), null);
 });
 
 test('intraday maps Yahoo tickers to symbols and indices, behind the same login', async () => {
   intradayLib.resetIntradayCache();
-  const closes = Array.from({ length: 40 }, (_, i) => 200 + Math.sin(i) * 3);
   const sym = stockKeys[0][0];
+  const ts = Array.from({ length: 40 }, (_, i) => Date.parse('2026-11-11T03:45:00Z') / 1000 + i * 300);
+  const closes = ts.map((_, i) => 200 + Math.sin(i) * 3);
   global.fetch = async (url) => {
-    const syms = decodeURIComponent(String(url).split('symbols=')[1].split('&')[0]).split(',');
-    const body = {};
-    for (const t of syms) if (t === `${sym}.NS` || t === '^NSEI') body[t] = { close: closes, timestamp: closes.map((_, i) => 1794368700 + i * 300) };
-    return { ok: true, status: 200, json: async () => body };
+    const ticker = decodeURIComponent(String(url).split('/chart/')[1].split('?')[0]);
+    if (ticker !== `${sym}.NS` && ticker !== '^NSEI') return { ok: false, status: 404, json: async () => ({}) };
+    const quote = { open: closes, high: closes.map((c) => c + 1), low: closes.map((c) => c - 1), close: closes, volume: closes.map(() => 10) };
+    return { ok: true, status: 200, json: async () => ({ chart: { result: [{ timestamp: ts, indicators: { quote: [quote] } }] } }) };
   };
   const denied = await call(intradayApi);
   assert.equal(denied.status, 401);
   const { token } = auth.issueToken();
   const ok = await call(intradayApi, { headers: { authorization: `Bearer ${token}` } });
   assert.equal(ok.status, 200);
-  assert.ok(ok.json.stocks[sym].ema9i > 0);
+  assert.ok(ok.json.stocks[sym].ema9i > 0 && ok.json.stocks[sym].vwap > 0);
   assert.ok(ok.json.indices['NIFTY 50'].rsiI > 0);
+  assert.equal(ok.json.indices['NIFTY 50'].vwapProxy, true);
   assert.equal(ok.json.count, 1);
+  assert.equal(ok.json.partial, true);
   assert.equal(ok.headers['cache-control'], 'private, no-store');
+});
+
+// ---------- /api/candles ----------
+const { default: candlesApi, sessionCandles } = await import('../api/candles.js');
+
+test('candles: today only, running VWAP, unknown symbols refused', async () => {
+  const day = (iso, n, base) => Array.from({ length: n }, (_, i) => ({ t: Date.parse(iso) / 1000 + i * 300, o: base, h: base + 2, l: base - 1, c: base + 1, v: i + 1 }));
+  const s = sessionCandles([...day('2026-11-10T03:45:00Z', 5, 100), ...day('2026-11-11T03:45:00Z', 3, 200)]);
+  assert.equal(s.day, '2026-11-11');
+  assert.equal(s.bars.length, 3);
+  assert.equal(s.bars[2][6], Math.round(((200 + 2 + 200 - 1 + 200 + 1) / 3) * 100) / 100);
+  assert.equal(s.vwapProxy, false);
+  assert.equal(sessionCandles([...day('2026-11-11T03:45:00Z', 2, 50)], true).vwapProxy, true);
+  const { token } = auth.issueToken();
+  const h = { authorization: `Bearer ${token}` };
+  const bad = await new Promise((resolve) => {
+    const res = { statusCode: 200, headers: {}, setHeader() {}, end(t) { resolve({ status: this.statusCode, json: JSON.parse(t) }); } };
+    candlesApi({ method: 'GET', url: '/api/candles?s=..%2Fsecret', headers: h }, res);
+  });
+  assert.equal(bad.status, 400);
 });

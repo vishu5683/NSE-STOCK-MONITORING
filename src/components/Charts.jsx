@@ -82,3 +82,72 @@ export function RangeBar({ low, high, value }) {
     </div>
   );
 }
+
+// Today's 5-minute candles with the running VWAP, CPR band and reference lines.
+// bars: [t, o, h, l, c, v, vwap]; levels: [{ label, value, color }]
+export function CandleChart({ bars, levels = [], cpr, height = 260 }) {
+  if (!bars || bars.length < 2) return null;
+  const W = 640;
+  const padL = 8;
+  const padR = 70;
+  const padT = 12;
+  const padB = 22;
+  const lows = bars.map((b) => b[3]);
+  const highs = bars.map((b) => b[2]);
+  let min = Math.min(...lows, ...bars.map((b) => b[6]));
+  let max = Math.max(...highs, ...bars.map((b) => b[6]));
+  // only draw reference lines that are near today's range, so far-away levels do not squash the candles
+  const near = (v) => typeof v === 'number' && v > min - (max - min) * 0.6 && v < max + (max - min) * 0.6;
+  const lv = levels.filter((l) => near(l.value));
+  const cprOn = cpr && near(cpr.bc) && near(cpr.tc);
+  for (const v of [...lv.map((l) => l.value), ...(cprOn ? [cpr.bc, cpr.tc] : [])]) {
+    min = Math.min(min, v);
+    max = Math.max(max, v);
+  }
+  const span = max - min || 1;
+  const slots = Math.max(bars.length, 75); // a full session is 75 five-minute bars
+  const step = (W - padL - padR) / slots;
+  const x = (i) => padL + (i + 0.5) * step;
+  const y = (v) => padT + (1 - (v - min) / span) * (height - padT - padB);
+  const bw = Math.max(1.5, step * 0.62);
+  const vwapPath = bars.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b[6]).toFixed(1)}`).join(' ');
+  const time = (t) => new Date(t * 1000 + 330 * 60000).toISOString().slice(11, 16);
+  const last = bars[bars.length - 1];
+  return (
+    <svg className="price-chart" viewBox={`0 0 ${W} ${height}`} role="img" aria-label="Today's 5-minute candles with VWAP">
+      {cprOn && <rect x={padL} width={W - padL - padR} y={y(Math.max(cpr.bc, cpr.tc))} height={Math.max(1, Math.abs(y(cpr.bc) - y(cpr.tc)))} fill="var(--warn)" opacity="0.13" />}
+      {[0, 0.5, 1].map((t) => (
+        <line key={t} x1={padL} x2={W - padR} y1={padT + t * (height - padT - padB)} y2={padT + t * (height - padT - padB)} stroke="var(--line)" strokeDasharray="3 4" />
+      ))}
+      {lv.map((l) => (
+        <g key={l.label}>
+          <line x1={padL} x2={W - padR} y1={y(l.value)} y2={y(l.value)} stroke={l.color} strokeDasharray="5 4" strokeWidth="1" opacity="0.85" />
+          <text x={W - padR + 5} y={y(l.value) + 4} fontSize="10.5" fill={l.color} fontWeight="600">
+            {l.label}
+          </text>
+        </g>
+      ))}
+      {bars.map((b, i) => {
+        const up = b[4] >= b[1];
+        const c = up ? 'var(--up)' : 'var(--down)';
+        const top = y(Math.max(b[1], b[4]));
+        return (
+          <g key={b[0]}>
+            <line x1={x(i)} x2={x(i)} y1={y(b[2])} y2={y(b[3])} stroke={c} strokeWidth="1" />
+            <rect x={x(i) - bw / 2} y={top} width={bw} height={Math.max(1, y(Math.min(b[1], b[4])) - top)} fill={c} />
+          </g>
+        );
+      })}
+      <path d={vwapPath} fill="none" stroke="var(--accent)" strokeWidth="1.8" />
+      <text x={W - padR + 5} y={y(last[6]) + 4} fontSize="10.5" fill="var(--accent)" fontWeight="700">
+        VWAP
+      </text>
+      <text x={padL} y={height - 5} fontSize="10" fill="var(--muted)">
+        {time(bars[0][0])}
+      </text>
+      <text x={x(bars.length - 1)} y={height - 5} fontSize="10" fill="var(--muted)" textAnchor="middle">
+        {time(last[0])}
+      </text>
+    </svg>
+  );
+}

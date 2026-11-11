@@ -341,6 +341,23 @@ def main() -> int:
         if s["s"] in ban:
             s["inBan"] = True
 
+    # ---- backtest of the daily setup rules (settings from public/config.json) ----
+    bt_meta = None
+    try:
+        from backtest import run_backtest
+
+        cfg_file = HERE.parent / "public" / "config.json"
+        cfg = {"minScore": 60, "volSpike": 2, "bullRsi": 55, "bearRsi": 45, "adx": 22, "atrMult": 1.5, "rr1": 1.5, "requireVolume": False}
+        if cfg_file.exists():
+            cfg.update(json.loads(cfg_file.read_text(encoding="utf-8")).get("screener", {}))
+        bt_meta, bt_per = run_backtest(frames, [s["s"] for s in stocks], cfg, yahoo_symbol)
+        for s in stocks:
+            if bt_per.get(s["s"]):
+                s["bt"] = bt_per[s["s"]]
+        print(f"Backtest: {bt_meta['all']}")
+    except Exception as exc:
+        print(f"WARN: backtest skipped: {exc}")
+
     indices = []
     for name, ysym in INDICES:
         df = frames.get(ysym)
@@ -387,8 +404,9 @@ def main() -> int:
             "banDate": extras.get("banDate"),
             "ban": sorted(ban),
             "participants": extras.get("participants"),
+            "backtest": bt_meta,
             "barForming": bool(forming),
-            "source": "Yahoo Finance (delayed ~15 min, unofficial) - daily candles",
+            "source": "Yahoo Finance (unofficial) daily and 5-minute candles; NSE public end-of-day files for F&O, ban list, MWPL, delivery and participant OI",
             "universe": int(len(uni)),
             "loaded": len(stocks),
             "failed": sorted(set(failed)),

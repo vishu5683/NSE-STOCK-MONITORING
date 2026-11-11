@@ -1,18 +1,22 @@
-// Live 5-minute indicators for every stock: EMA 9 / 15, RSI 14, MACD 12/26/9 on Yahoo "spark" closes.
-// 20 symbols per call, 5 trading days of 5-minute closes (same window as data-pipeline/intraday.py),
-// so one refresh is ~14 calls. Cached for a minute and shared by every visitor of this server instance.
-// VWAP needs volume, which spark does not send, so VWAP stays from the data file.
+// Live intraday layer for every stock and index, built on the server from Yahoo 5-minute candles
+// (chart endpoint, 5 trading days, one call per symbol, 10 at a time: ~260 calls in ~4 s).
+// It gives the browser the same fields as data-pipeline/intraday.py, but fresh:
+//   EMA 9 / 15, RSI 14, MACD 12/26/9, VWAP, opening range (first 15 min), day open,
+//   previous session high / low / close and the CPR built from it.
+// So intraday no longer depends on the GitHub schedule, which is often late or skipped.
+// Cached for two minutes and shared by every visitor of this server instance.
 
 import instruments from '../_instruments.json' with { type: 'json' };
 
-const BASE = 'https://query1.finance.yahoo.com/v8/finance/spark';
-const BATCH = 20;
-const FETCH_TIMEOUT_MS = 9000;
-const CACHE_MS = 60 * 1000;
-const STALE_OK_MS = 10 * 60 * 1000;
+const BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const CONCURRENCY = 10;
+const FETCH_TIMEOUT_MS = 8000;
+const CACHE_MS = 2 * 60 * 1000;
+const STALE_OK_MS = 15 * 60 * 1000;
 const MIN_BARS = 20;
+const IST_MS = 330 * 60 * 1000;
 
-const INDEX_TICKERS = { 'NIFTY 50': '^NSEI', 'BANK NIFTY': '^NSEBANK', SENSEX: '^BSESN', 'INDIA VIX': '^INDIAVIX' };
+export const INDEX_TICKERS = { 'NIFTY 50': '^NSEI', 'BANK NIFTY': '^NSEBANK', SENSEX: '^BSESN', 'INDIA VIX': '^INDIAVIX' };
 const target = new Map();
 for (const s of Object.keys(instruments.stocks)) target.set(`${s}.NS`, { kind: 'stock', key: s });
 for (const [name, t] of Object.entries(INDEX_TICKERS)) target.set(t, { kind: 'index', key: name });
@@ -30,7 +34,7 @@ export function emaSeries(values, n) {
   return out;
 }
 
-// Wilder RSI as in pipeline: ewm(alpha=1/n, adjust=False, min_periods=n) on gains / losses
+// Wilder RSI as in the pipeline: ewm(alpha=1/n, adjust=False) on gains / losses
 export function rsiLast(values, n = 14) {
   if (values.length <= n) return null;
   const a = 1 / n;
@@ -49,76 +53,113 @@ export function rsiLast(values, n = 14) {
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const r3 = (v) => Math.round(v * 1000) / 1000;
+const istDay = (sec) => new Date(sec * 1000 + IST_MS).toISOString().slice(0, 10);
 
-export function indicatorsFrom(item) {
-  if (!item || !Array.isArray(item.close)) return null;
-  const pts = [];
-  item.close.forEach((c, i) => {
-    const v = Number(c);
-    if (v > 0) pts.push([Number(item.timestamp?.[i]), v]);
-  });
-  if (pts.length < MIN_BARS) return null;
-  const closes = pts.map((p) => p[1]);
+// bars: [{ t, o, h, l, c, v }] oldest first
+export function indicatorsFrom(bars, { index = false } = {}) {
+  const clean = bars.filter((b) => b.c > 0);
+  if (clean.length < MIN_BARS) return null;
+  const closes = clean.map((b) => b.c);
   const e9 = emaSeries(closes, 9);
   const e15 = emaSeries(closes, 15);
   const e12 = emaSeries(closes, 12);
   const e26 = emaSeries(closes, 26);
   const macd = e12.map((v, i) => v - e26[i]);
   const sig = emaSeries(macd, 9);
-  const last = closes.length - 1;
+  const last = clean.length - 1;
   const rsi = rsiLast(closes);
-  const ts = pts[last][0];
-  return {
+  const out = {
     ema9i: r2(e9[last]),
     ema15i: r2(e15[last]),
     rsiI: rsi === null ? null : Math.round(rsi * 10) / 10,
     macdI: r3(macd[last]),
     macdIsig: r3(sig[last]),
     iLtp: r2(closes[last]),
-    iAt: Number.isFinite(ts) && ts > 0 ? new Date(ts * 1000).toISOString() : null,
+    iAt: clean[last].t ? new Date(clean[last].t * 1000).toISOString() : null,
   };
+
+  // today = the session of the last bar (IST); previous = the session before it
+  const today = istDay(clean[last].t);
+  const todayBars = clean.filter((b) => istDay(b.t) === today);
+  const before = clean.filter((b) => istDay(b.t) < today);
+  if (todayBars.length) {
+    const vol = todayBars.reduce((a, b) => a + (b.v > 0 ? b.v : 0), 0);
+    const typ = (b) => (b.h + b.l + b.c) / 3;
+    if (!index && vol > 0) out.vwap = r2(todayBars.reduce((a, b) => a + typ(b) * (b.v > 0 ? b.v : 0), 0) / vol);
+    else {
+      out.vwap = r2(todayBars.reduce((a, b) => a + typ(b), 0) / todayBars.length);
+      out.vwapProxy = true; // indices have no traded volume on Yahoo
+    }
+    out.dayOpen = r2(todayBars[0].o);
+    out.iBars = todayBars.length;
+    if (todayBars.length >= 3) {
+      out.orbHigh = r2(Math.max(...todayBars.slice(0, 3).map((b) => b.h)));
+      out.orbLow = r2(Math.min(...todayBars.slice(0, 3).map((b) => b.l)));
+    }
+  }
+  if (before.length) {
+    const prevDay = istDay(before[before.length - 1].t);
+    const pb = before.filter((b) => istDay(b.t) === prevDay);
+    const H = Math.max(...pb.map((b) => b.h));
+    const L = Math.min(...pb.map((b) => b.l));
+    const C = pb[pb.length - 1].c;
+    const P = (H + L + C) / 3;
+    const bc = (H + L) / 2;
+    const tc = 2 * P - bc;
+    Object.assign(out, {
+      pdh: r2(H),
+      pdl: r2(L),
+      pdc: r2(C),
+      cprPivot: r2(P),
+      cprBc: r2(Math.min(bc, tc)),
+      cprTc: r2(Math.max(bc, tc)),
+      cprWidthPct: r2((Math.abs(tc - bc) / P) * 100),
+    });
+  }
+  return out;
 }
 
-async function fetchBatch(batch) {
-  const url = `${BASE}?symbols=${batch.map(encodeURIComponent).join(',')}&range=5d&interval=5m`;
+// Yahoo chart JSON -> bars
+export function barsFromChart(json) {
+  const r = json?.chart?.result?.[0];
+  const q = r?.indicators?.quote?.[0];
+  if (!r || !q || !Array.isArray(r.timestamp)) return [];
+  return r.timestamp.map((t, i) => ({ t, o: Number(q.open?.[i]), h: Number(q.high?.[i]), l: Number(q.low?.[i]), c: Number(q.close?.[i]), v: Number(q.volume?.[i]) || 0 }));
+}
+
+export async function fetchChart(ticker) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: ctl.signal });
-    if (!res.ok) throw new Error(`Yahoo returned HTTP ${res.status}.`);
+    const res = await fetch(`${BASE}${encodeURIComponent(ticker)}?range=5d&interval=5m`, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: ctl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } finally {
     clearTimeout(timer);
   }
 }
 
-export function normaliseIntraday(maps) {
+async function refresh() {
   const stocks = {};
   const indices = {};
-  for (const map of maps) {
-    for (const [ticker, item] of Object.entries(map || {})) {
+  let next = 0;
+  let failed = 0;
+  async function worker() {
+    while (next < tickers.length) {
+      const ticker = tickers[next++];
       const t = target.get(ticker);
-      const ind = t && indicatorsFrom(item);
-      if (!ind) continue;
-      (t.kind === 'index' ? indices : stocks)[t.key] = ind;
+      try {
+        const ind = indicatorsFrom(barsFromChart(await fetchChart(ticker)), { index: t.kind === 'index' });
+        if (ind) (t.kind === 'index' ? indices : stocks)[t.key] = ind;
+      } catch {
+        failed += 1;
+      }
     }
   }
-  return { stocks, indices };
-}
-
-let cache = null;
-let inflight = null;
-
-async function refresh() {
-  const batches = [];
-  for (let i = 0; i < tickers.length; i += BATCH) batches.push(tickers.slice(i, i + BATCH));
-  const results = await Promise.allSettled(batches.map(fetchBatch));
-  const ok = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
-  if (!ok.length) throw new Error(results[0]?.reason?.message || 'Yahoo intraday is unavailable.');
-  const payload = { asOf: new Date().toISOString(), source: 'yahoo-5m', ...normaliseIntraday(ok) };
-  payload.partial = ok.length < batches.length;
-  payload.count = Object.keys(payload.stocks).length;
-  return payload;
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  const count = Object.keys(stocks).length;
+  if (!count) throw new Error('Yahoo intraday is unavailable.');
+  return { asOf: new Date().toISOString(), source: 'yahoo-5m', stocks, indices, count, partial: failed > 0 };
 }
 
 export async function getIntraday(now = Date.now()) {
@@ -140,6 +181,9 @@ export async function getIntraday(now = Date.now()) {
     throw err;
   }
 }
+
+let cache = null;
+let inflight = null;
 
 export function resetIntradayCache() {
   cache = null;

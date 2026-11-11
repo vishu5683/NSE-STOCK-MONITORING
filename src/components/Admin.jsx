@@ -239,9 +239,11 @@ function Panel({ settings, onChange, meta, universe, stocks, onLogout }) {
             <span className="muted">Failed symbols: </span>
             {meta.failed?.length ? meta.failed.join(', ') : 'none'}
           </p>
-          <p className="muted small">Data refreshes automatically on the schedule in <code>.github/workflows</code>. To refresh now, run the "Update data and deploy" workflow in GitHub Actions. If a refresh fails, the workflow opens a GitHub issue and GitHub emails the repo owner.</p>
+          <p className="muted small">On the live (Vercel) site, prices refresh every few seconds and the intraday layer (VWAP, EMA 9/15, RSI, MACD, opening range, CPR) every 2 minutes, without this file. The file itself (daily indicators, NSE end-of-day data, backtest) is rebuilt by the "Update data and deploy" workflow in GitHub Actions: on its schedule, which GitHub often runs late or skips, or now with "Run workflow". If a refresh fails, the workflow opens a GitHub issue and GitHub emails the repo owner.</p>
         </Card>
       </div>
+
+      {meta.backtest?.all?.n > 0 && <Backtest bt={meta.backtest} />}
 
       <Card title="Backup and restore settings">
         <div className="row gap wrap">
@@ -260,4 +262,38 @@ function Panel({ settings, onChange, meta, universe, stocks, onLogout }) {
 
 export default function Admin(props) {
   return <Panel {...props} onLogout={() => { logout(); window.location.reload(); }} />;
+}
+
+// Owner view: how the daily setup rules did over the last year (computed in data-pipeline/backtest.py)
+function Backtest({ bt }) {
+  const row = (label, x) => (
+    <tr key={label}>
+      <td className="sym">{label}</td>
+      <td className="num">{x.n}</td>
+      <td className="num up-t">{x.winPct}%</td>
+      <td className="num down-t">{x.n ? Math.round((x.loss / x.n) * 1000) / 10 : 0}%</td>
+      <td className="num">{x.n ? Math.round((x.open / x.n) * 1000) / 10 : 0}%</td>
+      <td className={`num ${x.avgR >= 0 ? 'up-t' : 'down-t'}`}>{x.avgR}</td>
+    </tr>
+  );
+  const r = bt.rules;
+  return (
+    <Card title="Backtest of the setup rules (owner only)">
+      <p className="small muted">
+        {bt.from} to {bt.to}. Rules: score {r.minScore}+, volume {r.volSpike}x, RSI {r.bullRsi}/{r.bearRsi}, ADX {r.adx}+, stop {r.atrMult} x ATR, target 1 at {r.rr1}R, held up to {bt.holdDays} sessions.
+        Entry at the signal day's close. A day that touches both stop and target counts as a loss. No brokerage or slippage.
+      </p>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr><th>Side</th><th>Signals</th><th>Target 1 first</th><th>Stop first</th><th>Neither (closed at day {bt.holdDays})</th><th>Average R</th></tr>
+          </thead>
+          <tbody>{[row('Bullish', bt.bull), row('Bearish', bt.bear), row('All', bt.all)]}</tbody>
+        </table>
+      </div>
+      <p className="small muted">
+        Average R above 0 means the rules made money per trade in units of risk; below 0 they lost. Uses the rules in public/config.json, not unsaved changes on this page.
+      </p>
+    </Card>
+  );
 }
