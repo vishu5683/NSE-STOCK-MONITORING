@@ -239,7 +239,7 @@ function Panel({ settings, onChange, meta, universe, stocks, onLogout }) {
             <span className="muted">Failed symbols: </span>
             {meta.failed?.length ? meta.failed.join(', ') : 'none'}
           </p>
-          <p className="muted small">On the live (Vercel) site, prices refresh every few seconds and the intraday layer (VWAP, EMA 9/15, RSI, MACD, opening range, CPR) every 2 minutes, without this file. The file itself (daily indicators, NSE end-of-day data, backtest) is rebuilt by the "Update data and deploy" workflow in GitHub Actions: on its schedule, which GitHub often runs late or skips, or now with "Run workflow". If a refresh fails, the workflow opens a GitHub issue and GitHub emails the repo owner.</p>
+          <p className="muted small">On the live (Vercel) site, prices refresh every few seconds and the intraday layer (VWAP, EMA 9/15, RSI, MACD, opening range, CPR) every 2 minutes, without this file. The file itself (daily indicators, NSE end-of-day data, backtest) is rebuilt by the "Update data and deploy" workflow in GitHub Actions. Vercel Cron starts it on weekdays around 19:00 and 08:30-09:30 IST (needs CRON_SECRET and GH_DISPATCH_TOKEN in Vercel); GitHub's own 20:00 schedule is only a backup. To refresh now, use "Run workflow" in GitHub Actions. If a refresh fails, the workflow opens a GitHub issue and GitHub emails the repo owner.</p>
         </Card>
       </div>
 

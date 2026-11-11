@@ -8,11 +8,12 @@ name: Update data and deploy
 #
 # Times are UTC. India market hours are 09:15-15:30 IST = 03:45-10:00 UTC.
 on:
+  # Main trigger: Vercel Cron calls /api/cron-refresh (about 19:00 and 08:30-09:30 IST on weekdays), which dispatches this workflow.
+  # Intraday data is built live on Vercel (/api/intraday), so no intraday schedule is needed here.
+  # Backup only: GitHub's own schedule is often late or skipped.
   schedule:
-    # every 30 min in session (intraday VWAP / EMA 9-15 / CPR scanners). GitHub may start a run a few minutes late.
-    - cron: '0,30 4-9 * * 1-5'  # 09:30-15:00 IST
-    - cron: '30 10 * * 1-5'     # 16:00 IST - after the close (final daily candle)
-  workflow_dispatch: {}      # "Run workflow" button for a manual refresh
+    - cron: '30 14 * * 1-5'     # 20:00 IST
+  workflow_dispatch: {}      # "Run workflow" button, and the Vercel cron dispatch
   push:
     branches: [main]
     paths-ignore:

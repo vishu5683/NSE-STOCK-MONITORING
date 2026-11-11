@@ -319,3 +319,28 @@ test('candles: today only, running VWAP, unknown symbols refused', async () => {
   });
   assert.equal(bad.status, 400);
 });
+
+// ---------- /api/cron-refresh (Vercel Cron -> GitHub workflow_dispatch) ----------
+const { default: cronRefresh } = await import('../api/cron-refresh.js');
+
+test('cron refresh: only with the cron secret, dispatches the workflow once', async () => {
+  process.env.CRON_SECRET = 'cron-secret-123';
+  delete process.env.GH_DISPATCH_TOKEN;
+  const calls = [];
+  global.fetch = async (url, opts) => {
+    calls.push({ url: String(url), opts });
+    return { status: 204 };
+  };
+  assert.equal((await call(cronRefresh)).status, 401);
+  assert.equal((await call(cronRefresh, { headers: { authorization: 'Bearer wrong' } })).status, 401);
+  assert.equal((await call(cronRefresh, { headers: { authorization: 'Bearer cron-secret-123' } })).status, 503);
+  process.env.GH_DISPATCH_TOKEN = 'gh-token';
+  const ok = await call(cronRefresh, { headers: { authorization: 'Bearer cron-secret-123' } });
+  assert.equal(ok.status, 200);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /actions\/workflows\/update-data-and-deploy\.yml\/dispatches$/);
+  assert.equal(calls[0].opts.method, 'POST');
+  assert.equal(JSON.parse(calls[0].opts.body).ref, 'main');
+  global.fetch = async () => ({ status: 403 });
+  assert.equal((await call(cronRefresh, { headers: { authorization: 'Bearer cron-secret-123' } })).status, 502);
+});

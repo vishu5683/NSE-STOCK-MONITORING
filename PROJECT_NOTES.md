@@ -206,3 +206,9 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 - Data strip market status is computed from the IST clock and the newest live tick (`marketPhaseNow`): weekend, opens 09:15, pre-open, open, closed, or "no live ticks (exchange holiday?)". The file's phase is only shown in Admin as "when the file was built".
 - Correctness check 11-Nov: Yahoo daily close / high / low / volume for 9-Nov vs NSE `sec_bhavdata_full_09112026.csv`: 257 of 257 identical (no difference above 0.05%; volume ratio exactly 1.0).
 - Rule R&D (walk-forward, 432 combinations, train before 3-Jul-2026, test after): the client-sheet rules are -0.004R train / -0.063R test. The best train combinations (mostly long, wide targets) lose in the test period (overfit). Only "fresh short" (first day a stock turns into a bearish setup, stop 1-1.5 ATR, target 1-1.5R, 5-20 sessions) stayed positive in both (+0.04 to +0.12R per trade), which is small and from one market regime. Defaults NOT changed. Script: scratchpad sweep.py (not in repo).
+
+### 15g. Daily refresh from Vercel (11-Nov-2026)
+- `vercel.json` "crons": `/api/cron-refresh` at `30 13 * * 1-5` (19:00 IST) and `0 3 * * 1-5` (08:30 IST). Hobby plan runs each cron once a day, somewhere inside that hour.
+- `/api/cron-refresh` accepts only `Authorization: Bearer $CRON_SECRET` (Vercel sends it), then POSTs GitHub `workflow_dispatch` for `update-data-and-deploy.yml` on `main` with `GH_DISPATCH_TOKEN` (fine-grained token, this repo only, Actions read and write). The workflow commits `public/data/*.json`, the commit redeploys Vercel.
+- GitHub schedule cut to one backup run at 20:00 IST. The old every-30-minutes intraday schedule is gone: intraday is live on Vercel.
+- A push to main still runs the workflow (tests, build, Pages) and Vercel deploys the push by itself.
