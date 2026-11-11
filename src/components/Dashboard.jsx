@@ -75,7 +75,7 @@ function MiniList({ title, rows, onOpen, kind }) {
   );
 }
 
-const heatColor = (v, scale) => {
+export const heatColor = (v, scale) => {
   const a = Math.max(0.14, Math.min(0.85, Math.abs(v) / scale));
   return v >= 0 ? `rgba(34,197,94,${a})` : `rgba(239,68,68,${a})`;
 };

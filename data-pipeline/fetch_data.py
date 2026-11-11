@@ -2,14 +2,14 @@
 NSE Stocks data pipeline (free, no API key).
 
 Reads universe.csv, downloads daily candles from Yahoo Finance (NSE tickers end with .NS),
-computes indicators (RSI, EMA 20/50/200, MACD, ADX, ATR, volume spike, 52-week range) and writes
+computes indicators (RSI, EMA 20/50/200, MACD, ADX, ATR, volume spike, 52-week range, intraday VWAP) and writes
 public/data/latest.json for the website.
 
 Honest limits (also shown in the app):
   * Yahoo data for NSE is delayed (about 15 minutes) and unofficial. Fine for a screener,
     not for order execution.
-  * Daily candles only. No intraday VWAP, no live option chain (there is no free reliable source),
-    so those are NOT faked.
+  * Intraday VWAP / EMA 9/15 / CPR come from 5-minute candles (intraday.py). There is no free
+    reliable option chain, OI or futures feed, so those are NOT faked.
 
 If too many symbols fail, the script exits with an error and leaves the old file untouched.
 """
@@ -257,6 +257,48 @@ def main() -> int:
             continue
         stocks.append({"s": row["symbol"], "sec": row["sector"], "lot": lots.get(row["symbol"]), **built})
 
+    # ---- intraday layer (VWAP, EMA 9/15, CPR, ATM). Optional: a failure here never blocks the daily data ----
+    intraday_ok = 0
+    iframes = {}
+    try:
+        from intraday import build_intraday, download_intraday
+
+        print("Downloading 5-minute candles ...")
+        iframes = download_intraday([yahoo_symbol(s["s"]) for s in stocks] + [i[1] for i in INDICES])
+        for s in stocks:
+            ib = build_intraday(iframes.get(yahoo_symbol(s["s"])), frames.get(yahoo_symbol(s["s"])))
+            if ib:
+                s.update(ib)
+                intraday_ok += 1
+    except Exception as exc:  # keep the daily file even if intraday breaks
+        print(f"WARN: intraday layer skipped: {exc}")
+
+    # ---- F&O layer from the NSE end-of-day bhavcopy (futures OI, PCR, max pain, IV, official lot) ----
+    fo_date = None
+    fo_count = 0
+    chains = {}
+    fo = None
+    try:
+        from derivatives import build_derivatives
+
+        print("Downloading NSE F&O bhavcopy ...")
+        fo = build_derivatives(now.date())
+    except Exception as exc:
+        print(f"WARN: F&O layer skipped: {exc}")
+    if fo:
+        fo_date = fo["date"]
+        chains = fo["chains"]
+        for s in stocks:
+            d = fo["stocks"].get(s["s"])
+            if fo["names"].get(s["s"]):
+                s["name"] = fo["names"][s["s"]]
+            if d:
+                lot_csv = s.get("lot")
+                s.update(d)
+                if not d.get("lot"):
+                    s["lot"] = lot_csv
+                fo_count += 1
+
     indices = []
     for name, ysym in INDICES:
         df = frames.get(ysym)
@@ -264,6 +306,14 @@ def main() -> int:
             continue
         b = build_row(df, False)
         if b:
+            try:
+                ib = build_intraday(iframes.get(ysym), df)
+                if ib:
+                    b.update(ib)
+            except Exception:
+                pass
+            if fo and fo["indices"].get(name):
+                b.update(fo["indices"][name])
             indices.append({"name": name, "symbol": ysym, **b})
 
     # ---- health checks: catch the "everything is 0.00%" kind of broken feed before publishing ----
@@ -277,6 +327,8 @@ def main() -> int:
         {"name": "Data date is recent", "ok": age_days <= 4, "detail": f"last session {ref_date.isoformat()}, {age_days} day(s) ago"},
         {"name": "Indices loaded", "ok": len(indices) >= 3, "detail": f"{len(indices)} of {len(INDICES)}"},
         {"name": "Volume data present", "ok": with_vol >= 0.9 * len(stocks), "detail": f"{with_vol} of {len(stocks)}"},
+        {"name": "F&O data (NSE bhavcopy)", "ok": fo_count >= 150, "detail": f"{fo_count} stocks, session {fo_date or 'not found'}"},
+        {"name": "Intraday (5-min) data", "ok": intraday_ok >= 0.8 * len(stocks), "detail": f"{intraday_ok} of {len(stocks)}"},
     ]
     if zero_ratio > 0.5:
         print(f"ERROR: {zero}/{len(stocks)} stocks have 0.00% change. Feed looks broken. Keeping the previous file.")
@@ -288,6 +340,7 @@ def main() -> int:
             "generatedAtIST": now.strftime("%d-%b-%Y %I:%M %p IST"),
             "marketPhase": phase,
             "lastTradingDate": ref_date.isoformat(),
+            "foDate": fo_date,
             "barForming": bool(forming),
             "source": "Yahoo Finance (delayed ~15 min, unofficial) - daily candles",
             "universe": int(len(uni)),
@@ -296,8 +349,9 @@ def main() -> int:
             "health": health,
             "notes": [
                 "Volume spike compares the last completed session with its 20-day average.",
-                "Daily timeframe only. No intraday VWAP and no live option chain in the free data.",
-                "Lot sizes come from lot_sizes.csv (copied from the client sheet of 8-Nov-2026). NSE revises lot sizes, so verify before trading.",
+                "Intraday VWAP, EMA 9/15 and CPR come from Yahoo 5-minute candles.",
+                f"Futures OI, option chain, PCR, max pain, IV and lot sizes come from the NSE F&O bhavcopy of {fo_date or 'n/a'} (end of day, not live).",
+                "Lot sizes: NSE bhavcopy when available, else lot_sizes.csv (client sheet of 8-Nov-2026).",
                 "Screener output is rule-based research, not investment advice.",
             ],
         },
@@ -309,6 +363,11 @@ def main() -> int:
     tmp = OUT.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, separators=(",", ":"), allow_nan=False), encoding="utf-8")
     os.replace(tmp, OUT)
+    if chains:
+        chain_out = OUT.parent / "chain.json"
+        ctmp = chain_out.with_suffix(".tmp")
+        ctmp.write_text(json.dumps({"date": fo_date, "chains": chains}, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+        os.replace(ctmp, chain_out)
     for h in health:
         print(f"  [{'ok' if h['ok'] else 'WARN'}] {h['name']}: {h['detail']}")
     print(f"OK: {len(stocks)} stocks, {len(indices)} indices, {len(set(failed))} failed -> {OUT}")

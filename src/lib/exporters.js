@@ -1,5 +1,6 @@
 import { price, pct, dec, mult } from './fmt.js';
 import { weeklyLabel, monthlyLabel, convictionLabel, breakoutLabel } from './signals.js';
+import { intradaySignal, settingsMatch, cprZone, atmStrike, indexSignal } from './intraday.js';
 
 function download(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -135,6 +136,8 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
     ...[
       ['Minimum score', n(c.minScore)], ['Volume spike (x)', n(c.volSpike)], ['Bull RSI >=', n(c.bullRsi)], ['Bear RSI <=', n(c.bearRsi)], ['ADX >=', n(c.adx)],
       ['Stop loss = ATR x', n(c.atrMult)], ['Target 1 = risk x', n(c.rr1)], ['Target 2 = risk x', n(c.rr2)], ['Volume required', text(c.requireVolume ? 'Yes' : 'No')],
+      ['VWAP alignment', text(c.requireVwap !== false ? 'Yes' : 'No')], ['9/15 EMA required', text(c.requireEma915 !== false ? 'Yes' : 'No')],
+      ['MACD cross required', text(c.macdCross !== false ? 'Yes' : 'No')], ['CPR no-trade filter', text(c.cprFilter !== false ? 'Yes' : 'No')], ['Wide CPR above %', n(c.cprWidePct)],
     ].map(([k, v], i) => kv(k, v, i)),
   ];
 
@@ -166,6 +169,62 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
       : [[text('No stock is within 2% of its 52-week high or low.')]]),
   ];
 
+  // Intraday scanner (same rules as the Scanners page): BUY / SELL first, then WAIT, then NO-TRADE
+  const sigOrder = { BUY: 0, SELL: 1, WAIT: 2, 'NO-TRADE': 3 };
+  const sigCell = (x) =>
+    x.signal === 'BUY'
+      ? { value: x.option ? `BUY (${x.option})` : 'BUY', textColor: '#166534', backgroundColor: '#dcfce7', fontWeight: 'bold' }
+      : x.signal === 'SELL'
+        ? { value: x.option ? `SELL (${x.option})` : 'SELL', textColor: '#991b1b', backgroundColor: '#fee2e2', fontWeight: 'bold' }
+        : x.signal === 'NO-TRADE'
+          ? { value: `NO-TRADE (${x.reason})`, textColor: '#b45309', fontWeight: 'bold' }
+          : text(x.signal, { textColor: '#64748b' });
+  const intraRows = rows
+    .map((r) => ({ r, x: intradaySignal(r, c) }))
+    .filter(({ x }) => x.signal !== 'NO DATA')
+    .sort((a, b) => sigOrder[a.x.signal] - sigOrder[b.x.signal] || (b.r.valueCr ?? 0) - (a.r.valueCr ?? 0));
+  const cprLabel = (r) => {
+    const z = cprZone(r, c);
+    return !z ? '' : z.wide ? 'WIDE' : z.inside ? 'INSIDE' : z.above ? 'ABOVE' : 'BELOW';
+  };
+  const intraday = [
+    head(['Symbol', 'Sector', 'LTP', 'Today %', 'VWAP', 'vs VWAP', 'EMA 9 (5m)', 'EMA 15 (5m)', 'RSI (5m)', 'MACD (5m)', 'MACD signal', 'CPR BC', 'CPR TC', 'CPR width %', 'CPR zone', 'ATM', 'Signal', 'Stop loss', 'Target 1', 'Lot size', 'Settings match', 'Last candle']),
+    ...(intraRows.length
+      ? intraRows.map(({ r, x }, i) =>
+          styleRow(
+            [
+              { value: r.s, fontWeight: 'bold' }, text(r.sec), n(r.ltp, '#,##0.00', { fontWeight: 'bold' }), changeCell(r.chg), n(r.vwap, '#,##0.00'),
+              text(r.ltp > r.vwap ? 'ABOVE' : 'BELOW', { textColor: r.ltp > r.vwap ? '#15803d' : '#b91c1c', fontWeight: 'bold', align: 'center' }),
+              n(r.ema9i, '#,##0.00'), n(r.ema15i, '#,##0.00'), rsiCell(r.rsiI), n(r.macdI, '0.000'), n(r.macdIsig, '0.000'),
+              n(r.cprBc, '#,##0.00'), n(r.cprTc, '#,##0.00'), n(r.cprWidthPct, '0.00'), text(cprLabel(r), { align: 'center' }), n(atmStrike(r.ltp), '#,##0'),
+              sigCell(x), n(x.plan?.stop, '#,##0.00', { textColor: '#b91c1c' }), n(x.plan?.t1, '#,##0.00', { textColor: '#15803d' }), n(r.lot, '#,##0'),
+              text(settingsMatch(r, x).label, { fontWeight: 'bold' }), text(r.iAsOf || ''),
+            ],
+            i,
+          ),
+        )
+      : [[text('No 5-minute data in this file.')]]),
+  ];
+  const indexSheet = [
+    head(['Index', 'Spot', 'Today %', 'VWAP', 'vs VWAP', 'EMA 9 (5m)', 'EMA 15 (5m)', 'RSI (5m)', 'ATM', 'Bias', 'Signal', 'Last candle']),
+    ...indices
+      .filter((x) => x.name !== 'INDIA VIX')
+      .map((ix, i) => {
+        const s = indexSignal(ix, c);
+        return styleRow(
+          [
+            { value: ix.name, fontWeight: 'bold' }, n(ix.ltp, '#,##0.00', { fontWeight: 'bold' }), changeCell(ix.chg), n(ix.vwap, '#,##0.00'),
+            text(s.above === null ? '' : s.above ? 'ABOVE' : 'BELOW', { align: 'center' }), n(ix.ema9i, '#,##0.00'), n(ix.ema15i, '#,##0.00'), rsiCell(ix.rsiI),
+            n(s.atm, '#,##0'), text(s.bias, { fontWeight: 'bold', textColor: s.bias.startsWith('BULL') ? '#15803d' : s.bias.startsWith('BEAR') ? '#b91c1c' : '#475569' }),
+            sigCell(s), text(ix.iAsOf || ''),
+          ],
+          i,
+        );
+      }),
+    [],
+    [text('Index VWAP: Yahoo reports no volume for indices, so it is the average of the 5-minute typical price.', { textColor: '#475569' })],
+  ];
+
   const guide = [
     head(['Column', 'What it means']),
     ...[
@@ -183,7 +242,10 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
       ['ADX 14', 'Trend strength. Higher means a stronger trend, in either direction.'],
       ['EMA 20 / 50 / 200', 'Exponential moving averages of the daily close.'],
       ['From 52W high / low %', 'Distance of the last price from the 52-week high and low.'],
-      ['Data', `${meta.source}. Daily candles. Data date ${meta.lastTradingDate}.`],
+      ['Intraday sheet', 'VWAP, EMA 9/15, RSI and MACD from the 5-minute candles. BUY = above VWAP, 9 EMA above 15 EMA, MACD above signal, RSI at or above the bullish level. SELL is the mirror. NO-TRADE = price inside the CPR or a wide CPR day.'],
+      ['CPR', 'Central pivot range from the previous session: pivot = (H+L+C)/3, BC = (H+L)/2, TC = 2 x pivot - BC. Wide when (TC-BC)/pivot is above the Settings %.'],
+      ['ATM', 'At-the-money strike rounded to the usual NSE strike gap for that price. Verify the exact strike in the option chain.'],
+      ['Data', `${meta.source}. Daily candles plus 5-minute candles. Data date ${meta.lastTradingDate}.`],
       ['Important', 'Rule-based research output. Not investment advice. Verify prices with your broker before trading.'],
     ].map(([k, v], i) => styleRow([text(k, { fontWeight: 'bold', alignVertical: 'top' }), text(v, { wrap: true, alignVertical: 'top' })], i)),
   ];
@@ -192,6 +254,8 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
     { sheet: 'Summary', data: summary, columns: [{ width: 28 }, { width: 14 }, { width: 11 }, { width: 11 }, { width: 12 }, { width: 12 }, { width: 14 }] },
     stockSheet('Bullish setups', bull),
     stockSheet('Bearish setups', bear),
+    { sheet: 'Intraday', data: intraday, columns: [{ width: 14 }, { width: 22 }, { width: 11 }, { width: 9 }, { width: 11 }, { width: 9 }, { width: 11 }, { width: 11 }, { width: 9 }, { width: 10 }, { width: 10 }, { width: 11 }, { width: 11 }, { width: 10 }, { width: 10 }, { width: 9 }, { width: 22 }, { width: 11 }, { width: 11 }, { width: 9 }, { width: 22 }, { width: 17 }], stickyRowsCount: 1, stickyColumnsCount: 1 },
+    { sheet: 'Index options', data: indexSheet, columns: [{ width: 14 }, { width: 12 }, { width: 9 }, { width: 12 }, { width: 9 }, { width: 12 }, { width: 12 }, { width: 9 }, { width: 10 }, { width: 24 }, { width: 22 }, { width: 17 }], stickyRowsCount: 1 },
     { sheet: 'Momentum', data: momentum, columns: [{ width: 15 }, { width: 24 }, { width: 12 }, { width: 10 }, { width: 10 }, { width: 18 }, { width: 10 }, { width: 18 }, { width: 11 }, { width: 18 }, { width: 11 }], stickyRowsCount: 1, stickyColumnsCount: 1 },
     { sheet: 'Breakouts', data: breakouts, columns: [{ width: 15 }, { width: 24 }, { width: 12 }, { width: 10 }, { width: 11 }, { width: 14 }, { width: 11 }, { width: 14 }, { width: 11 }, { width: 18 }, { width: 11 }], stickyRowsCount: 1 },
     { sheet: 'Sectors', data: sectorSheet, columns: [{ width: 28 }, { width: 9 }, { width: 11 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 14 }], stickyRowsCount: 1 },
@@ -403,3 +467,19 @@ export async function exportPdf({ rows, indices, sectors, breadth, meta, setting
   doc.save(`${slug(settings.clientName)}-market-report-${stamp(meta)}.pdf`);
 }
 
+
+// ---------- One scanner tab -> Excel (same columns the page shows) ----------
+// cols: [{ label, x(row) -> number | string }]
+export async function exportTable({ title, cols, rows, meta, settings }) {
+  const { default: writeXlsxFile } = await import('write-excel-file/browser');
+  const span = Math.max(2, cols.length);
+  const cellOf = (v) => (typeof v === 'number' && Number.isFinite(v) ? { value: v, type: Number } : { value: v === null || v === undefined ? '' : String(v) });
+  const data = [
+    band(`${settings.clientName}  |  ${title}`, span, { fontSize: 14, height: 30 }),
+    band(`Data ${meta.lastTradingDate}  |  File ${meta.generatedAtIST}${meta.foDate ? `  |  F&O (NSE EOD) ${meta.foDate}` : ''}  |  Exported ${new Date().toLocaleString('en-IN')}`, span, { fontWeight: undefined, backgroundColor: '#1d4477' }),
+    head(cols.map((c) => c.label)),
+    ...rows.map((r, i) => styleRow(cols.map((c) => cellOf(c.x(r))), i)),
+  ];
+  const blob = await writeXlsxFile([{ sheet: title.slice(0, 31), data, columns: cols.map((c) => ({ width: Math.min(30, Math.max(9, c.label.length + 3)) })), stickyRowsCount: 3, stickyColumnsCount: 1 }]).toBlob();
+  download(blob, `${slug(settings.clientName)}-${slug(title)}-${stamp(meta)}.xlsx`);
+}

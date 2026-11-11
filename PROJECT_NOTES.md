@@ -69,11 +69,11 @@ No backend. The browser loads `data/latest.json` and does all scoring, filtering
 
 Other free sources if needed later: NSE F&O UDiFF bhavcopy (end-of-day OI, free, format changed again from 6-Jul-2026), broker APIs (Upstox, Fyers, Angel One SmartAPI are free with an account and give live data and option chain; Zerodha's data API is paid), unofficial NSE website JSON (nsepython) which breaks often and blocks cloud IPs.
 
-## 5. Rules (defaults, editable in Admin)
-- Min score 60, volume spike 1.25x, bull RSI >= 53, bear RSI <= 47, ADX >= 18
+## 5. Rules (defaults, editable in Admin; since 11-Nov-2026 the default is the "Client sheet" preset, see section 15)
+- Min score 60, volume spike 2x, bull RSI >= 55, bear RSI <= 45, ADX >= 22 (Client sheet preset)
 - Bullish setup also needs price > EMA20 > EMA50 (mirror for bearish)
 - Score 0-100: EMA trend 25, RSI 20, ADX 20, volume 15, near 52W extreme 10, MACD 10
-- Stop loss = 1.5 x ATR, Target 1 = 2R, Target 2 = 3R (mechanical levels, not advice)
+- Stop loss = 1.5 x ATR, Target 1 = 1.5R, Target 2 = 2.5R (mechanical levels, not advice)
 - "Require volume" toggle makes setups stricter (off by default)
 
 ## 6. Admin panel
@@ -142,3 +142,34 @@ The PDF (header date 08-11-2026, a Sunday) is really the **6-Nov-2026 close**. O
 - **Measured at 10:25 IST on 11-Nov-2026 (market open): Yahoo NSE stocks and indices were 0 minutes old; SENSEX was 16 minutes late.** An earlier note saying "Yahoo is 15 minutes delayed" was wrong for NSE. It is unofficial though, so it can change or throttle without notice, and Vercel server IPs may be treated differently from this PC. Not yet checked on a real Vercel deploy.
 - Upstox needs an active account (segments). The Basic plan showed "reactivate your account"; until that is done the site runs on Yahoo.
 - Tests: 25 (`npm test`).
+
+## 15. Scanners page = client's Google Sheet (11-Nov-2026)
+
+Reference: client's "Professional_F&O_Excel_Screener" Google Sheet (16 tabs, refreshes every 2-3 min with Apps Script on Yahoo data).
+Mapped to the new **Scanners** tab (`src/components/Scanners.jsx`, rules in `src/lib/intraday.js`, tests `intraday.test.js`):
+
+| Sheet tab | Our place |
+|---|---|
+| Profitable Setups, Dashboard | Scanners > Profitable setups (bull + bear, conviction, ATM, lot, entry/SL/T1/T2, intraday signal, Settings match) + stat tiles |
+| Intraday Scanner | Scanners > Intraday (5-min VWAP, EMA 9/15, RSI, MACD, CPR zone, BUY/SELL/WAIT/NO-TRADE) |
+| Breakout / Swing Scanner | Scanners > Breakout / Swing |
+| Most Active Equities | Scanners > Most active (turnover sort) |
+| Index Options Scanner | Scanners > Index options (NIFTY/BANKNIFTY/SENSEX, VWAP, EMA, RSI, ATM, CE/PE bias) |
+| Sector Heatmap, TimeframeCache | Sectors tab + Momentum sheet in Excel |
+| Option Chain, Futures Data, F&O Screener OI columns | From the **NSE F&O bhavcopy** (official public end-of-day file, `data-pipeline/derivatives.py`): PCR, call/put OI walls, call/put writing, max pain, ATM IV (Black-Scholes on the close), futures price/basis/OI/build-up, official lot size, company names (CM bhavcopy). Strike-wise chain in `public/data/chain.json` (ATM +/-10 strikes, indices +/-30), loaded only when a chain opens. The client sheet's own OI is NOT real (Futures OI = exactly 1.5 x volume, futures = spot x ~1.0035, every row "Moderate"). |
+| Settings | Admin > "Client sheet" preset (now the default): Vol 2x, RSI 55/45, ADX 22, score 60, ATR 1.5, T1 1.5R, T2 2.5R, + VWAP / 9-15 EMA / MACD cross / CPR filter switches, wide CPR 0.5% |
+
+- Pipeline: `data-pipeline/intraday.py` downloads 5-min candles (period 5d) for stocks + indices and adds `vwap, ema9i, ema15i, rsiI, macdI, macdIsig, cprBc, cprTc, cprPivot, cprWidthPct, iBars, iAsOf` (and `vwapProxy` for indices: Yahoo has no index volume, so VWAP = mean typical price). Failure there never blocks the daily file. Health check "Intraday (5-min) data".
+- Signal, CPR zone, ATM strike are computed **in the browser** against the live price, so they move with each live tick. ATM gap bands are approximate (index steps 50/100/100).
+- Sheet's "9/15 EMA" and RSI are **daily** values (HINDPETRO EMA 374/365 at price 403). Ours are true 5-minute values.
+- Workflow now runs every 30 min 09:30-15:00 IST + 16:00 (was 3 times a day). Every 5 min would add ~280 KB commits all day.
+- Excel report has new sheets "Intraday" and "Index options"; Settings sheet lists the new switches.
+- Next with Upstox token: real option chain (PCR, OI support/resistance, IV, max pain), futures OI build-up, intraday candles from Upstox instead of Yahoo.
+
+### 15b. Pro Sheet tabs (11-Nov-2026, later the same day)
+- Scanners page title "F&O Pro Sheet", 11 tabs in the sheet's order: Profitable Setups, Dashboard, Most Active, Index Options, F&O Screener, Option Chain, Futures Data, Breakout, Swing, Sector Heatmap, Intraday. Last tab is remembered (localStorage `nsestocks.scanView`).
+- Every tab: sort, search (symbol / company / sector), "Excel (this tab)" export (`exportTable` in exporters.js), live price flash, row tap opens the stock or the chain popup.
+- Index Options: VWAP, EMA 9/15, RSI, ATM, PCR, max pain, OI walls, IV, master signal (intraday signal must agree with PCR), India VIX note, ITM/ATM/OTM CE+PE premiums from the chain.
+- Bhavcopy URLs: `nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip` (and `/cm/` for names). Use a plain User-Agent `nsestocks-pro-data/1.0`: a UA containing a URL is stalled by the NSE host (timeouts). Posted in the evening; the pipeline walks back up to 8 days. Option expiry = first one after the bhavcopy date.
+- Not done on purpose: the NSE live option-chain JSON API sits behind a bot check; scraping it was refused. Live intraday OI comes with Upstox.
+- Sheet lot sizes (8-Nov) differ from NSE now (e.g. HINDPETRO 1350 vs NSE 2025); NSE value wins.

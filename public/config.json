@@ -5,14 +5,19 @@
   "disclaimer": "Rule-based research output for information only. It is not investment advice or a recommendation to buy or sell. Data is delayed and may contain errors. Verify prices with your broker before trading.",
   "screener": {
     "minScore": 60,
-    "volSpike": 1.25,
-    "bullRsi": 53,
-    "bearRsi": 47,
-    "adx": 18,
+    "volSpike": 2,
+    "bullRsi": 55,
+    "bearRsi": 45,
+    "adx": 22,
     "atrMult": 1.5,
-    "rr1": 2,
-    "rr2": 3,
-    "requireVolume": false
+    "rr1": 1.5,
+    "rr2": 2.5,
+    "requireVolume": false,
+    "requireVwap": true,
+    "requireEma915": true,
+    "macdCross": true,
+    "cprFilter": true,
+    "cprWidePct": 0.5
   },
   "hidden": [],
   "watchlist": []

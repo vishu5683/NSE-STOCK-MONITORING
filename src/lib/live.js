@@ -17,6 +17,11 @@ export function applyLive(row, quote) {
     liveAt: quote.ts || null,
   };
   if (prev) next.prevClose = prev;
+  // a live tick outside today's range moves the day high / low (only when the row is today's bar)
+  if (isNum(row.high) && isNum(row.low) && quote.sameDay !== false) {
+    next.high = Math.max(row.high, ltp);
+    next.low = Math.min(row.low, ltp);
+  }
   if (isNum(row.hi52) && row.hi52 > 0) {
     const hi = Math.max(row.hi52, ltp);
     next.hi52 = hi;

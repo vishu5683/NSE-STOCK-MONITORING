@@ -6,6 +6,7 @@ import { ageText } from '../lib/fmt.js';
 import { analyseAll } from '../lib/signals.js';
 
 const RULE_PRESETS = {
+  'Client sheet': { minScore: 60, volSpike: 2, bullRsi: 55, bearRsi: 45, adx: 22, atrMult: 1.5, rr1: 1.5, rr2: 2.5, requireVolume: false },
   Conservative: { minScore: 75, volSpike: 1.5, bullRsi: 58, bearRsi: 42, adx: 22, atrMult: 2, rr1: 1.5, rr2: 2.5, requireVolume: true },
   Balanced: { minScore: 60, volSpike: 1.25, bullRsi: 53, bearRsi: 47, adx: 18, atrMult: 1.5, rr1: 2, rr2: 3, requireVolume: false },
   Aggressive: { minScore: 50, volSpike: 1.1, bullRsi: 51, bearRsi: 49, adx: 15, atrMult: 1.2, rr1: 2, rr2: 3.5, requireVolume: false },
@@ -23,6 +24,7 @@ function validate(sc) {
   if (num('atrMult') && sc.atrMult <= 0) e.push('Stop loss multiplier must be above 0.');
   if (num('rr1') && sc.rr1 <= 0) e.push('Target 1 multiplier must be above 0.');
   if (num('rr1') && num('rr2') && sc.rr2 <= sc.rr1) e.push('Target 2 must be further than Target 1.');
+  if (!num('cprWidePct') || sc.cprWidePct <= 0) e.push('Wide CPR % must be above 0.');
   return e;
 }
 
@@ -185,6 +187,21 @@ function Panel({ settings, onChange, meta, universe, stocks, onLogout }) {
             <input type="checkbox" checked={!!sc.requireVolume} onChange={(e) => setSc('requireVolume', e.target.checked)} />
             <span>Require the volume spike for a setup (fewer, stronger signals)</span>
           </label>
+          <h3 className="sub">Intraday scanner rules</h3>
+          <div className="form-grid">
+            <NumField label="Wide CPR above %" hint="wider = consolidation, no trade" value={sc.cprWidePct} onChange={(v) => setSc('cprWidePct', v)} step={0.05} min={0.05} />
+          </div>
+          {[
+            ['requireVwap', 'Require VWAP alignment (long above VWAP, short below)'],
+            ['requireEma915', 'Require 9/15 EMA (long 9 above 15, short 9 below 15)'],
+            ['macdCross', 'Require MACD above / below its signal line'],
+            ['cprFilter', 'No trade inside the CPR or on a wide CPR day'],
+          ].map(([k, text]) => (
+            <label key={k} className="check">
+              <input type="checkbox" checked={sc[k] !== false} onChange={(e) => setSc(k, e.target.checked)} />
+              <span>{text}</span>
+            </label>
+          ))}
         </Card>
       </div>
 

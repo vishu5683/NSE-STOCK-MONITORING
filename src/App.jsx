@@ -7,6 +7,7 @@ import { fetchLive, probe, pollMs, hasToken, clearToken } from './lib/liveApi.js
 import { logout, LOGIN_ENABLED } from './lib/auth.js';
 import Dashboard, { SectorHeatmap } from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
+import Scanners from './components/Scanners.jsx';
 import Reports from './components/Reports.jsx';
 import Admin from './components/Admin.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
@@ -16,6 +17,7 @@ import { Card, Change } from './components/ui.jsx';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: 'M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z' },
+  { id: 'scanners', label: 'Scanners', icon: 'M4 18l5-6 4 3 7-9M4 4v16h16' },
   { id: 'screener', label: 'Screener', icon: 'M3 5h18l-7 8v6l-4 2v-8z' },
   { id: 'sectors', label: 'Sectors', icon: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z' },
   { id: 'reports', label: 'Reports', icon: 'M12 3v12m0 0l-5-5m5 5l5-5M4 21h16' },
@@ -292,7 +294,7 @@ export default function App() {
             {live.source === 'yahoo'
               ? `Prices from Yahoo Finance (${live.mapped} symbols, unofficial feed, usually within a minute for NSE stocks, SENSEX about 15 minutes late).`
               : `Upstox live prices are on (${live.mapped} symbols).`}{' '}
-            RSI, EMA, ADX and volume spike still come from the last daily candle.
+            RSI, EMA, ADX, VWAP and volume spike come from the last data refresh; VWAP side, CPR zone, ATM strike and scanner signals follow the live price.
             {live.unmapped?.length > 0 ? ` No Upstox key for: ${live.unmapped.join(', ')}.` : ''}
             {live.stale ? ` Showing the last good prices: ${live.warning}` : ''}
             {live.partial && !live.stale ? ' Some prices could not be refreshed this round.' : ''}
@@ -317,6 +319,7 @@ export default function App() {
         )}
 
         {tab === 'dashboard' && <Dashboard rows={rows} indices={book.indices} breadth={breadth} sectors={sectors} onOpen={setPicked} onGoScreener={openSector} />}
+        {tab === 'scanners' && <Scanners rows={rows} indices={book.indices} settings={settings} onOpen={setPicked} meta={meta} />}
         {tab === 'screener' && (
           <Screener rows={rows} sectors={sectors} initialSector={sectorFilter} watchlist={settings.watchlist || []} onOpen={setPicked} onToggleWatch={toggleWatch} />
         )}
