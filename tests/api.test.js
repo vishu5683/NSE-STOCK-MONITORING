@@ -384,7 +384,7 @@ test('/api/oi: option chains + futures quotes, login and token errors', async ()
     if (u.includes('/option/chain')) return { ok: true, status: 200, json: async () => ({ status: 'success', data: fakeChain(102, [90, 95, 100, 105, 110]) }) };
     if (u.includes('/market-quote/quotes')) {
       const keys = decodeURIComponent(u.split('instrument_key=')[1]).split(',');
-      const data = Object.fromEntries(keys.map((k, i) => [`NSE_FO:X${i}`, { instrument_token: k, last_price: 101, oi: 1100, volume: 50, ohlc: { close: 100 } }]));
+      const data = Object.fromEntries(keys.map((k, i) => [`NSE_FO:X${i}`, { instrument_token: k, last_price: 101, oi: 1100, volume: 50, net_change: 1, ohlc: { close: 101 } }]));
       return { ok: true, status: 200, json: async () => ({ status: 'success', data }) };
     }
     return { ok: false, status: 404, json: async () => ({}) };
@@ -398,6 +398,7 @@ test('/api/oi: option chains + futures quotes, login and token errors', async ()
   assert.equal(ok.json.indices['NIFTY 50'].pcr > 0, true);
   assert.equal(ok.json.stocks.RELIANCE.futLive, 101);
   assert.equal(ok.json.stocks.RELIANCE.futOiLive, 1100);
+  assert.equal(ok.json.stocks.RELIANCE.futCp, 100);
   assert.match(calls.find((c) => c.includes('/option/chain')), /expiry_date=\d{4}-\d{2}-\d{2}/);
   // chain endpoint
   const bad = await new Promise((resolve) => {

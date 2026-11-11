@@ -2,13 +2,21 @@
 //   * option chain per underlying (v2/option/chain): PCR, call / put OI walls, heaviest writing (OI change),
 //     max pain, ATM strike and IV - the same summary data-pipeline/derivatives.py builds from the NSE bhavcopy
 //   * near-month futures (v2/market-quote/quotes, full mode): price, OI, volume, previous close
-// One option-chain call per underlying (~206), 10 at a time, cached for 5 minutes and shared by all visitors.
+// One option-chain call per underlying (~206), paced to about 20 a second, cached for 5 minutes and shared by all visitors.
 // Expiries and futures keys come from api/_instruments.json ("fo"), which the daily workflow rebuilds.
 
 import instruments from '../_instruments.json' with { type: 'json' };
 
 const BASE = 'https://api.upstox.com/v2';
-const CONCURRENCY = 10;
+const CONCURRENCY = 4;
+const MIN_GAP_MS = 50; // Upstox allows about 50 requests a second; stay near 20 a second
+let nextSlot = 0;
+async function paced() {
+  const now = Date.now();
+  const wait = Math.max(0, nextSlot - now);
+  nextSlot = Math.max(now, nextSlot) + MIN_GAP_MS;
+  if (wait) await new Promise((r) => setTimeout(r, wait));
+}
 const FETCH_TIMEOUT_MS = 9000;
 const CACHE_MS = 5 * 60 * 1000;
 const STALE_OK_MS = 30 * 60 * 1000;
@@ -37,7 +45,8 @@ export function nearFuture(futures, today) {
   return (futures || []).find(([d]) => d >= today) || null;
 }
 
-async function get(path, token) {
+async function get(path, token, retry = true) {
+  await paced();
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
   let res;
@@ -49,7 +58,13 @@ async function get(path, token) {
     clearTimeout(timer);
   }
   if (res.status === 401 || res.status === 403) throw new OiError('UPSTOX_TOKEN_INVALID', `Upstox refused the token (HTTP ${res.status}).`);
-  if (res.status === 429) throw new OiError('UPSTOX_RATE_LIMIT', 'Upstox rate limit reached.');
+  if (res.status === 429) {
+    if (retry) {
+      await new Promise((r) => setTimeout(r, 1100));
+      return get(path, token, false);
+    }
+    throw new OiError('UPSTOX_RATE_LIMIT', 'Upstox rate limit reached.');
+  }
   if (!res.ok) throw new OiError('UPSTOX_ERROR', `Upstox returned HTTP ${res.status}.`);
   const body = await res.json().catch(() => ({}));
   return body?.data;
@@ -147,7 +162,9 @@ async function futuresQuotes(names, today, token) {
       const t = keyToName.get(q?.instrument_token);
       const ltp = Number(q?.last_price);
       if (!t || !isNum(ltp) || ltp <= 0) continue;
-      const cp = Number(q?.ohlc?.close) > 0 ? Number(q.ohlc.close) : isNum(Number(q?.net_change)) ? ltp - Number(q.net_change) : null;
+      // previous close = last price - net change (ohlc.close is today's running close during the session)
+      const nc = Number(q?.net_change);
+      const cp = isNum(nc) ? r2(ltp - nc) : null;
       out[t.name] = { futLive: ltp, futOiLive: Number(q?.oi) || null, futVolLive: Number(q?.volume) || null, futCp: cp, futExpiry: t.expiry };
     }
   }
@@ -190,9 +207,9 @@ async function refresh(token, now) {
   } catch (err) {
     firstError ||= err;
   }
-  const count = Object.keys(stocks).length;
-  if (!count) throw firstError || new OiError('UPSTOX_ERROR', 'No option data returned.');
-  return { asOf: new Date().toISOString(), day: today, source: 'upstox', stocks, indices, count, failed, partial: failed > 0 };
+  const count = Object.values(stocks).filter((x) => isNum(x.pcr)).length; // stocks with a live option chain
+  if (!count && !Object.keys(stocks).length) throw firstError || new OiError('UPSTOX_ERROR', 'No option data returned.');
+  return { asOf: new Date().toISOString(), day: today, source: 'upstox', stocks, indices, count, futures: Object.values(stocks).filter((x) => isNum(x.futLive)).length, failed, partial: failed > 0, warning: failed ? firstError?.message : undefined };
 }
 
 export async function getOi(token, now = Date.now()) {
