@@ -319,17 +319,25 @@ export default function App() {
         )}
         {import.meta.env.DEV && live?.authed && !live.connected && live.message && <div className="banner warn">{live.message}</div>}
         {liveOn && (
-          <div className={`banner ${live.stale || live.partial ? 'warn' : 'info'}`}>
-            {live.source === 'yahoo'
-              ? `Prices from Yahoo Finance (${live.mapped} symbols, unofficial feed, usually within a minute for NSE stocks, SENSEX about 15 minutes late).`
-              : `Upstox live prices are on (${live.mapped} symbols).`}{' '}
-            {intra?.count
-              ? `Intraday VWAP, EMA 9/15, RSI, MACD, opening range and CPR are live for ${intra.count} stocks (5-minute candles, refreshed every 2 minutes). Daily RSI / ADX / EMA and NSE OI come from the last data refresh.`
-              : 'RSI, EMA, ADX, VWAP and volume spike come from the last data refresh; VWAP side, CPR zone, ATM strike and scanner signals follow the live price.'}
-            {live.unmapped?.length > 0 ? ` No Upstox key for: ${live.unmapped.join(', ')}.` : ''}
-            {live.stale ? ` Showing the last good prices: ${live.warning}` : ''}
-            {live.partial && !live.stale ? ' Some prices could not be refreshed this round.' : ''}
-          </div>
+          <details className={`banner live-note ${live.stale || live.partial ? 'warn' : 'info'}`}>
+            <summary>
+              {live.source === 'yahoo' ? 'Live prices (Yahoo)' : 'Upstox live prices'} · {live.mapped} stocks
+              {intra?.count ? ` · intraday indicators every 2 min` : ''}
+              {meta.foDate ? ` · OI: NSE close ${meta.foDate}` : ''}
+              {live.stale ? ' · showing last good prices' : ''}
+            </summary>
+            <p>
+              {live.source === 'yahoo'
+                ? `Prices from Yahoo Finance (${live.mapped} symbols, unofficial feed, usually within a minute for NSE stocks, SENSEX about 15 minutes late).`
+                : `Upstox live prices are on (${live.mapped} symbols).`}{' '}
+              {intra?.count
+                ? `Intraday VWAP, EMA 9/15, RSI, MACD, opening range and CPR are live for ${intra.count} stocks (5-minute candles, refreshed every 2 minutes). Daily RSI / ADX / EMA and NSE OI come from the last data refresh.`
+                : 'RSI, EMA, ADX, VWAP and volume spike come from the last data refresh; VWAP side, CPR zone, ATM strike and scanner signals follow the live price.'}
+              {live.source !== 'yahoo' && live.unmapped?.length > 0 ? ` No Upstox key for: ${live.unmapped.join(', ')}.` : ''}
+              {live.stale ? ` Showing the last good prices: ${live.warning}` : ''}
+              {live.partial && !live.stale ? ' Some prices could not be refreshed this round.' : ''}
+            </p>
+          </details>
         )}
         {!import.meta.env.DEV && live && !live.connected && live.message && <div className="banner warn">Live prices paused: {live.message}</div>}
         {meta.health?.some((h) => !h.ok) && (

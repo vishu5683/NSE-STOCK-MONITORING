@@ -212,3 +212,10 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 - `/api/cron-refresh` accepts only `Authorization: Bearer $CRON_SECRET` (Vercel sends it), then POSTs GitHub `workflow_dispatch` for `update-data-and-deploy.yml` on `main` with `GH_DISPATCH_TOKEN` (fine-grained token, this repo only, Actions read and write). The workflow commits `public/data/*.json`, the commit redeploys Vercel.
 - GitHub schedule cut to one backup run at 20:00 IST. The old every-30-minutes intraday schedule is gone: intraday is live on Vercel.
 - A push to main still runs the workflow (tests, build, Pages) and Vercel deploys the push by itself.
+
+### 15h. Pro Sheet UX v3 (11-Nov-2026, client feedback: "looks like a plain Excel, tiny tabs, the table scrolls when I scroll the page")
+- One vertical scroll only: the page. `.sheet-wrap` is `overflow-x: auto` with no height limit and no `overscroll-behavior: contain` (that blocked the wheel from reaching the page). The sticky header inside the box is gone with it; the frozen Symbol column still works for sideways scroll on desktop.
+- Phones (`usePhone`, max-width 680px): every sheet table renders as cards (symbol + LTP + change on top, the columns a phone would show below, plus columns flagged `card: true`, e.g. Entry / Stop Loss / Target 1). "Sort by" select instead of header clicks. Tab picker: big current-tab button with prev / next arrows that opens a list of all 13 sheets with a one-line meaning each.
+- Desktop: icon tab buttons that wrap (no hidden overflow), and a title + one-line meaning above each sheet.
+- Live info banner is one line (details on tap). The Upstox "no key for" note only shows when Upstox is the source. On phones the matched list, the card title and the repeated tab name are hidden.
+- Checks: scratchpad e2e/ux3.mjs (13 tabs x phone + desktop: data present, no scroll traps, no sideways scroll, no NaN, wheel moves the page) and e2e/final.mjs (popups, Back, chain, downloads, pages, theme) against the live URL.

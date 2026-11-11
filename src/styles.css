@@ -406,7 +406,7 @@ h3.sub { margin: 14px 0 8px; }
 @media (max-width: 680px) { .card-head .row.gap { flex-wrap: wrap; justify-content: flex-end; } }
 
 /* ---- UI polish: Excel-like sheet tables, phone layout ---- */
-.sheet-wrap { max-height: min(72vh, 880px); overflow: auto; border: 1px solid var(--line); border-radius: 12px; overscroll-behavior: contain; }
+.sheet-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; } /* page is the only vertical scroll */
 .sheet-wrap .table th { z-index: 2; box-shadow: inset 0 -1px 0 var(--line); background: var(--card2); color: var(--text); }
 .sheet-wrap .table td.freeze, .sheet-wrap .table th.freeze { position: sticky; left: 0; box-shadow: inset -1px 0 0 var(--line); }
 .sheet-wrap .table td.freeze { z-index: 1; background: var(--card); }
@@ -434,7 +434,6 @@ h3.sub { margin: 14px 0 8px; }
   .sheet-head-tools .alert-text { display: none; }
   .sheet-head-tools .btn { padding: 8px 12px; font-size: 15px; }
   .sheet-tabs { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%); mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%); }
-  .sheet-wrap { max-height: 68vh; border-radius: 10px; }
   .sheet-wrap .table td.freeze .sym { max-width: 112px; display: inline-block; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
   .kv { padding: 8px 10px; font-size: 12.5px; }
   .match-line { font-size: 12px; }
@@ -470,3 +469,73 @@ h3.sub { margin: 14px 0 8px; }
 .modal-body > .chart-legend { margin-top: 6px; }
 .modal-body .price-chart { display: block; }
 .modal-body > .seg { display: inline-flex; }
+
+/* ===== Pro Sheet UX v3 ===== */
+.tab-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.tab-grid button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card2); color: var(--muted); font-weight: 600; font-size: 13px; cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+.tab-grid button:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.tab-grid button.on { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); }
+.tg-icon { font-size: 14px; line-height: 1; }
+.tab-title { margin: 14px 0 10px; padding: 12px 14px; border-radius: 12px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent); border-left: 3px solid var(--accent); }
+.tab-title h3 { font-size: 16px; margin: 0 0 2px; }
+.tab-title p { margin: 0; }
+.scan-stats .stat { border-left: 3px solid var(--line); }
+.scan-stats .stat.t-accent { border-left-color: var(--accent); }
+.scan-stats .stat.t-up { border-left-color: var(--up); }
+.scan-stats .stat.t-down { border-left-color: var(--down); }
+.scan-stats .stat.t-warn { border-left-color: var(--warn); }
+.scan-stats .stat strong { font-size: 18px; }
+.sort-pick { flex: 1; min-width: 0; }
+.sort-pick select { width: 100%; padding: 7px 10px; font-size: 13px; }
+
+/* phone: tab picker */
+.tab-picker { display: grid; grid-template-columns: 44px 1fr 44px; gap: 8px; align-items: stretch; }
+.tp-arrow { border: 1px solid var(--line); background: var(--card2); color: var(--text); border-radius: 12px; font-size: 24px; line-height: 1; }
+.tp-current { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--card2)); color: var(--text); font-weight: 700; font-size: 15px; min-width: 0; }
+.tp-icon { font-size: 18px; }
+.tp-label { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-count { font-size: 11.5px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.picker-list { display: grid; gap: 8px; }
+.picker-item { display: flex; align-items: center; gap: 12px; text-align: left; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card2); color: var(--text); }
+.picker-item.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--card2)); }
+.pi-icon { font-size: 22px; width: 30px; text-align: center; flex: none; }
+.pi-text { display: grid; gap: 2px; min-width: 0; }
+.pi-text strong { font-size: 14.5px; }
+.pi-text small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+
+/* phone: one card per row */
+.row-cards { display: grid; gap: 10px; }
+.row-card { display: grid; gap: 8px; width: 100%; text-align: left; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--card2); color: var(--text); font: inherit; cursor: pointer; }
+.row-card:active { transform: scale(0.99); border-color: var(--accent); }
+.rc-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.rc-sym .sym { font-size: 16px; }
+.rc-price { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.rc-price strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.rc-name { color: var(--muted); font-size: 11.5px; margin-top: -6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.rc-field { min-width: 0; }
+.rc-field > span { display: block; font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.rc-field > div { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.rc-field .tag { white-space: normal; }
+.rc-field .scorebar { max-width: 140px; }
+@media (max-width: 680px) {
+  .tab-title { margin: 12px 0 8px; padding: 10px 12px; }
+  .tab-title h3 { font-size: 15px; }
+  .scan-stats .stat strong { font-size: 15px; }
+  .grid-tools { gap: 8px; }
+}
+
+/* compact live note: one line, tap for the details */
+.live-note { padding: 8px 12px; }
+.live-note > summary { cursor: pointer; list-style: none; font-size: 12.5px; font-weight: 600; }
+.live-note > summary::before { content: 'ℹ '; }
+.live-note > summary::after { content: ' ▾'; color: var(--muted); }
+.live-note[open] > summary::after { content: ' ▴'; }
+.live-note > p { margin: 8px 0 0; font-size: 12.5px; }
+@media (max-width: 680px) {
+  .match-line { display: none; }
+  .sheet-card > .card-head > h2 { display: none; }
+  .tab-title h3 { display: none; }
+  .tab-title { margin: 10px 0 6px; padding: 8px 10px; }
+  .live-note > summary { font-size: 12px; }
+}

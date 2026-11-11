@@ -32,20 +32,34 @@ import { exportTable } from '../lib/exporters.js';
 
 // Same tabs, same order as the client's Google Sheet.
 const VIEWS = [
-  { id: 'setups', label: 'Profitable Setups' },
-  { id: 'summary', label: 'Dashboard' },
-  { id: 'active', label: 'Most Active' },
-  { id: 'index', label: 'Index Options' },
-  { id: 'fno', label: 'F&O Screener' },
-  { id: 'chain', label: 'Option Chain' },
-  { id: 'futures', label: 'Futures Data' },
-  { id: 'breakout', label: 'Breakout' },
-  { id: 'swing', label: 'Swing' },
-  { id: 'heatmap', label: 'Sector Heatmap' },
-  { id: 'intraday', label: 'Intraday' },
-  { id: 'patterns', label: 'Patterns & ORB' },
-  { id: 'fii', label: 'FII / DII' },
+  { id: 'setups', label: 'Profitable Setups', icon: '💎', desc: 'Ranked bullish and bearish setups with ATM strike, entry, stop loss and targets.' },
+  { id: 'summary', label: 'Dashboard', icon: '📊', desc: 'Market summary and every stock that matches all your settings.' },
+  { id: 'active', label: 'Most Active', icon: '🔥', desc: 'Highest turnover stocks today with volume spike, delivery and signal.' },
+  { id: 'index', label: 'Index Options', icon: '🧭', desc: 'NIFTY, BANK NIFTY and SENSEX: VWAP, PCR, max pain and the CE / PE bias.' },
+  { id: 'fno', label: 'F&O Screener', icon: '🧮', desc: 'Every F&O stock with futures OI, PCR, IV, MWPL and delivery.' },
+  { id: 'chain', label: 'Option Chain', icon: '⛓️', desc: 'PCR, OI support and resistance, writing and max pain. Tap a stock for the strike chain.' },
+  { id: 'futures', label: 'Futures Data', icon: '📈', desc: 'Futures price, basis, OI change and long / short build-up.' },
+  { id: 'breakout', label: 'Breakout', icon: '🚀', desc: 'Stocks at or near their 52-week high or low with volume.' },
+  { id: 'swing', label: 'Swing', icon: '🌊', desc: 'EMA 20 / 50 / 200 trend, momentum and swing trade levels.' },
+  { id: 'heatmap', label: 'Sector Heatmap', icon: '🗺️', desc: 'Every stock by sector for today, a week and a month.' },
+  { id: 'intraday', label: 'Intraday', icon: '⚡', desc: 'Live VWAP, EMA 9 / 15, RSI, MACD and CPR with BUY / SELL / WAIT.' },
+  { id: 'patterns', label: 'Patterns & ORB', icon: '🎯', desc: 'Gap, opening range breakout, previous day range, NR7 and inside bars.' },
+  { id: 'fii', label: 'FII / DII', icon: '🏦', desc: 'How FIIs, DIIs, pros and clients are positioned in futures and options.' },
 ];
+
+// phones get cards and a tab picker instead of wide tables and a thin tab strip
+function usePhone() {
+  const q = '(max-width: 680px)';
+  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(q).matches);
+  useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const m = window.matchMedia(q);
+    const on = () => setPhone(m.matches);
+    m.addEventListener ? m.addEventListener('change', on) : m.addListener(on);
+    return () => (m.removeEventListener ? m.removeEventListener('change', on) : m.removeListener(on));
+  }, []);
+  return phone;
+}
 const VIEW_KEY = 'nsestocks.scanView';
 const ALERT_KEY = 'nsestocks.alerts';
 const readFlag = (k) => {
@@ -102,6 +116,7 @@ function SignalCell({ intra }) {
 
 // Sortable table. col: { label, cell(r), x(r) for sort + export, sort?: false, hide?, cls?, str? }
 function Grid({ rows, cols, initialSort, onOpen, empty, title, ctx }) {
+  const phone = usePhone();
   const [sort, setSort] = useState(initialSort || null);
   const [limit, setLimit] = useState(60);
   const [busy, setBusy] = useState(false);
@@ -128,14 +143,75 @@ function Grid({ rows, cols, initialSort, onOpen, empty, title, ctx }) {
     }
   };
   if (!rows.length) return <Empty>{empty}</Empty>;
+  const sortable = cols.map((c, i) => ({ c, i })).filter(({ c }) => c.sort !== false);
+  const tools = (
+    <div className="grid-tools">
+      <span className="muted small">{rows.length} {rows.length === 1 ? 'stock' : 'stocks'}</span>
+      {phone && (
+        <label className="sort-pick">
+          <span className="sr-only">Sort by</span>
+          <select className="input" value={sort ? `${sort.i}:${sort.dir}` : ''} onChange={(e) => {
+            const [i, dir] = e.target.value.split(':').map(Number);
+            setSort(Number.isFinite(i) ? { i, dir } : null);
+          }}>
+            {!sort && <option value="">Sort by…</option>}
+            {sortable.flatMap(({ c, i }) => [
+              <option key={`${i}d`} value={`${i}:-1`}>{c.label} {c.str ? 'Z-A' : 'high → low'}</option>,
+              <option key={`${i}a`} value={`${i}:1`}>{c.label} {c.str ? 'A-Z' : 'low → high'}</option>,
+            ])}
+          </select>
+        </label>
+      )}
+      <button className="btn ghost sm" onClick={doExport} disabled={busy}>
+        {busy ? 'Preparing…' : phone ? '⬇ Excel' : '⬇ Excel (this tab)'}
+      </button>
+    </div>
+  );
+  const more = list.length > limit && (
+    <div className="center mt">
+      <button className="btn ghost" onClick={() => setLimit(limit + 60)}>
+        Show more ({list.length - limit} left)
+      </button>
+    </div>
+  );
+  if (phone) {
+    // card per row: symbol column on top, LTP / change on the right, every column a phone table would show below
+    const symCol = cols.find((c) => c.freeze) || cols[0];
+    const ltpCol = cols.find((c) => c.label === 'LTP' || c.label === 'Spot LTP');
+    const chgCol = cols.find((c) => c.label === 'Chg %' || c.label === 'Today %');
+    const fields = cols.filter((c) => c !== symCol && c !== ltpCol && c !== chgCol && (!c.hide || c.card));
+    return (
+      <>
+        {tools}
+        <div className="row-cards">
+          {list.slice(0, limit).map((r) => (
+            <div role="button" tabIndex={0} key={r.s || r.name} className="row-card" onClick={onOpen ? () => onOpen(r) : undefined} onKeyDown={onOpen ? (e) => e.key === 'Enter' && onOpen(r) : undefined}>
+              <div className="rc-head">
+                <span className="rc-sym">{symCol.cell ? symCol.cell(r) : symCol.x(r)}</span>
+                <span className="rc-price">
+                  {ltpCol && <strong>{ltpCol.cell ? ltpCol.cell(r) : ltpCol.x(r)}</strong>}
+                  {chgCol && (chgCol.cell ? chgCol.cell(r) : chgCol.x(r))}
+                </span>
+              </div>
+              {r.name && <div className="rc-name">{r.name}</div>}
+              <div className="rc-fields">
+                {fields.map((c) => (
+                  <div key={c.label} className="rc-field">
+                    <span>{c.label}</span>
+                    <div>{c.cell ? c.cell(r) : c.x(r) ?? '-'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        {more}
+      </>
+    );
+  }
   return (
     <>
-      <div className="grid-tools">
-        <span className="muted small">{rows.length} rows</span>
-        <button className="btn ghost sm" onClick={doExport} disabled={busy}>
-          {busy ? 'Preparing…' : '⬇ Excel (this tab)'}
-        </button>
-      </div>
+      {tools}
       <div className="table-wrap sheet-wrap">
         <table className="table">
           <thead>
@@ -169,14 +245,8 @@ function Grid({ rows, cols, initialSort, onOpen, empty, title, ctx }) {
             ))}
           </tbody>
         </table>
-        {list.length > limit && (
-          <div className="center mt">
-            <button className="btn ghost" onClick={() => setLimit(limit + 60)}>
-              Show more ({list.length - limit} left)
-            </button>
-          </div>
-        )}
       </div>
+      {more}
     </>
   );
 }
@@ -233,6 +303,11 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
   const ctx = { meta, settings };
 
   const tabsRef = useRef(null);
+  const phone = usePhone();
+  const [picker, setPicker] = useState(false);
+  const vi = Math.max(0, VIEWS.findIndex((v) => v.id === view));
+  const cur = VIEWS[vi];
+  const step = (d) => setView(VIEWS[(vi + d + VIEWS.length) % VIEWS.length].id);
   useEffect(() => {
     try {
       localStorage.setItem(VIEW_KEY, view);
@@ -316,12 +391,12 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
   return (
     <>
       <div className="grid-stats scan-stats">
-        <div className="stat"><span>Settings matched</span><strong>{stats.matched}</strong></div>
-        <div className="stat"><span>Intraday BUY</span><strong className="up-t">{stats.buy}</strong></div>
-        <div className="stat"><span>Intraday SELL</span><strong className="down-t">{stats.sell}</strong></div>
-        <div className="stat"><span>No-trade (CPR)</span><strong className="warn-t">{stats.noTrade}</strong></div>
-        <div className="stat"><span>Last 5-min candle</span><strong>{stats.lastBar ? stats.lastBar.slice(11) : '-'}</strong></div>
-        <div className="stat"><span>F&O data (EOD)</span><strong>{meta.foDate ? `${stats.fno} · ${shortDate(meta.foDate)}` : '-'}</strong></div>
+        <div className="stat t-accent"><span>✅ Settings matched</span><strong>{stats.matched}</strong></div>
+        <div className="stat t-up"><span>🟢 Intraday BUY</span><strong className="up-t">{stats.buy}</strong></div>
+        <div className="stat t-down"><span>🔴 Intraday SELL</span><strong className="down-t">{stats.sell}</strong></div>
+        <div className="stat t-warn"><span>⏸ No-trade (CPR)</span><strong className="warn-t">{stats.noTrade}</strong></div>
+        <div className="stat"><span>🕒 Last 5-min candle</span><strong>{stats.lastBar ? stats.lastBar.slice(11) : '-'}</strong></div>
+        <div className="stat"><span>📦 F&O data (EOD)</span><strong>{meta.foDate ? `${stats.fno} · ${shortDate(meta.foDate)}` : '-'}</strong></div>
       </div>
       {matched.length > 0 && (
         <details className="small muted match-line">
@@ -346,15 +421,54 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
           </div>
         }
       >
-        <div className="toolbar">
-          <div className="seg wrap sheet-tabs" role="tablist" ref={tabsRef}>
+        {phone ? (
+          <div className="tab-picker">
+            <button className="tp-arrow" onClick={() => step(-1)} aria-label="Previous tab">‹</button>
+            <button className="tp-current" onClick={() => setPicker(true)} aria-haspopup="dialog">
+              <span className="tp-icon">{cur.icon}</span>
+              <span className="tp-label">{cur.label}</span>
+              <span className="tp-count">{vi + 1}/{VIEWS.length} ▾</span>
+            </button>
+            <button className="tp-arrow" onClick={() => step(1)} aria-label="Next tab">›</button>
+          </div>
+        ) : (
+          <div className="sheet-tabs tab-grid" role="tablist" ref={tabsRef}>
             {VIEWS.map((v) => (
-              <button key={v.id} className={view === v.id ? 'on' : ''} onClick={() => setView(v.id)} role="tab" aria-selected={view === v.id}>
+              <button key={v.id} className={view === v.id ? 'on' : ''} onClick={() => setView(v.id)} role="tab" aria-selected={view === v.id} title={v.desc}>
+                <span className="tg-icon">{v.icon}</span>
                 {v.label}
               </button>
             ))}
           </div>
+        )}
+        <div className="tab-title">
+          <h3>
+            {cur.icon} {cur.label}
+          </h3>
+          <p className="muted small">{cur.desc}</p>
         </div>
+        {picker && (
+          <Modal onClose={() => setPicker(false)} label="Choose a sheet" title="Choose a sheet">
+            <div className="picker-list">
+              {VIEWS.map((v) => (
+                <button
+                  key={v.id}
+                  className={`picker-item ${view === v.id ? 'on' : ''}`}
+                  onClick={() => {
+                    setView(v.id);
+                    setPicker(false);
+                  }}
+                >
+                  <span className="pi-icon">{v.icon}</span>
+                  <span className="pi-text">
+                    <strong>{v.label}</strong>
+                    <small>{v.desc}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </Modal>
+        )}
 
         {view === 'setups' && <Setups rows={shown} onOpen={onOpen} ctx={ctx} />}
         {view === 'summary' && <Summary rows={enriched} stats={stats} meta={meta} onOpen={onOpen} ctx={ctx} />}
@@ -529,8 +643,8 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
               { label: 'ATR', x: (r) => r.atr, cell: (r) => price(r.atr), cls: 'num', hide: 'md' },
               { label: 'Trend', x: (r) => swingTrend(r), str: true, hide: 'md' },
               { label: 'Entry', x: (r) => r.swing.plan?.entry, cell: (r) => price(r.swing.plan?.entry), cls: 'num', hide: 'sm' },
-              { label: 'Stop Loss', x: (r) => r.swing.plan?.stop, cell: (r) => <span className="down-t">{price(r.swing.plan?.stop)}</span>, cls: 'num', hide: 'sm' },
-              { label: 'Target 1', x: (r) => r.swing.plan?.t1, cell: (r) => <span className="up-t">{price(r.swing.plan?.t1)}</span>, cls: 'num', hide: 'sm' },
+              { label: 'Stop Loss', x: (r) => r.swing.plan?.stop, cell: (r) => <span className="down-t">{price(r.swing.plan?.stop)}</span>, cls: 'num', hide: 'sm', card: true },
+              { label: 'Target 1', x: (r) => r.swing.plan?.t1, cell: (r) => <span className="up-t">{price(r.swing.plan?.t1)}</span>, cls: 'num', hide: 'sm', card: true },
               { label: 'Target 2', x: (r) => r.swing.plan?.t2, cell: (r) => <span className="up-t">{price(r.swing.plan?.t2)}</span>, cls: 'num', hide: 'md' },
               { label: 'R : R', x: (r) => (r.swing.plan ? `1 : ${r.swing.plan.rr2}` : '-'), sort: false, hide: 'md' },
               MATCH,
@@ -676,9 +790,9 @@ function Setups({ rows, onOpen, ctx }) {
     { label: 'RSI / ADX', x: (r) => `RSI ${dec(r.rsi, 1)} | ${dec(r.adx, 0)} ADX`, sort: false, hide: 'md' },
     { label: 'Option Strike (ATM)', x: (r) => `${r.atm} ${side === 'BULL' ? 'CE' : 'PE'}`, cell: (r) => <strong className={side === 'BULL' ? 'up-t' : 'down-t'}>{r.atm} {side === 'BULL' ? 'CE' : 'PE'}</strong>, sort: false },
     LOT,
-    { label: 'Entry', x: (r) => r.plan?.entry, cell: (r) => price(r.plan?.entry), cls: 'num', hide: 'sm' },
-    { label: 'Stop Loss', x: (r) => r.plan?.stop, cell: (r) => <span className="down-t">{price(r.plan?.stop)}</span>, cls: 'num', hide: 'sm' },
-    { label: 'Target 1', x: (r) => r.plan?.t1, cell: (r) => <span className="up-t">{price(r.plan?.t1)}</span>, cls: 'num', hide: 'sm' },
+    { label: 'Entry', x: (r) => r.plan?.entry, cell: (r) => price(r.plan?.entry), cls: 'num', hide: 'sm', card: true },
+    { label: 'Stop Loss', x: (r) => r.plan?.stop, cell: (r) => <span className="down-t">{price(r.plan?.stop)}</span>, cls: 'num', hide: 'sm', card: true },
+    { label: 'Target 1', x: (r) => r.plan?.t1, cell: (r) => <span className="up-t">{price(r.plan?.t1)}</span>, cls: 'num', hide: 'sm', card: true },
     { label: 'Target 2', x: (r) => r.plan?.t2, cell: (r) => <span className="up-t">{price(r.plan?.t2)}</span>, cls: 'num', hide: 'md' },
     { label: 'PCR / Build-up', x: (r) => (has(r.pcr) ? `${dec(r.pcr, 2)} · ${r.futBuildup}` : '-'), sort: false, hide: 'md' },
     { label: 'Intraday', x: (r) => sigText(r.intra), cell: (r) => <SignalCell intra={r.intra} />, str: true, hide: 'md' },
