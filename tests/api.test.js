@@ -344,3 +344,78 @@ test('cron refresh: only with the cron secret, dispatches the workflow once', as
   global.fetch = async () => ({ status: 403 });
   assert.equal((await call(cronRefresh, { headers: { authorization: 'Bearer cron-secret-123' } })).status, 502);
 });
+
+// ---------- /api/oi and /api/chain (Upstox option chain + futures) ----------
+const oiLib = await import('../api/_lib/upstoxOi.js');
+const { default: oiApi } = await import('../api/oi.js');
+const { default: chainApi } = await import('../api/chain.js');
+
+const fakeChain = (spot, strikes) =>
+  strikes.map((k) => ({
+    strike_price: k,
+    underlying_spot_price: spot,
+    call_options: { market_data: { oi: k > spot ? 5000 + k : 1000, prev_oi: k > spot ? 4000 + k : 1000, ltp: Math.max(1, spot - k + 20), volume: 10 }, option_greeks: { iv: 20 } },
+    put_options: { market_data: { oi: k < spot ? 6000 + k : 1000, prev_oi: k < spot ? 5000 : 1000, ltp: Math.max(1, k - spot + 20), volume: 10 }, option_greeks: { iv: 22 } },
+  }));
+
+test('option chain summary: PCR, OI walls, writing, max pain, ATM IV', () => {
+  const c = oiLib.chainRows(fakeChain(102, [90, 95, 100, 105, 110]));
+  const s = oiLib.summarise(c.rows, c.spot, c.ivs, '2026-11-23');
+  assert.equal(s.atmLive, 100);
+  assert.equal(s.step, 5);
+  assert.equal(s.callOiRes, 110);
+  assert.equal(s.putOiSup, 100);
+  assert.equal(s.callWriting, 105); // 1000 + 105 rise vs 1000 + 110: same, first max wins
+  assert.equal(s.iv, 21);
+  assert.equal(s.pcr, Math.round((s.peOi / s.ceOi) * 100) / 100);
+  assert.ok([90, 95, 100, 105, 110].includes(s.maxPain));
+  assert.equal(oiLib.summarise([], 100, new Map(), 'x'), null);
+  assert.equal(oiLib.pickExpiry(['2026-11-10', '2026-11-17', '2026-11-23'], '2026-11-12'), '2026-11-17');
+  assert.equal(oiLib.pickExpiry(['2026-11-12'], '2026-11-12'), '2026-11-12');
+  assert.deepEqual(oiLib.nearFuture([['2026-11-23', 'K1'], ['2026-12-29', 'K2']], '2026-11-24'), ['2026-12-29', 'K2']);
+});
+
+test('/api/oi: option chains + futures quotes, login and token errors', async () => {
+  oiLib.resetOiCache();
+  const calls = [];
+  global.fetch = async (url) => {
+    const u = String(url);
+    calls.push(u);
+    if (u.includes('/option/chain')) return { ok: true, status: 200, json: async () => ({ status: 'success', data: fakeChain(102, [90, 95, 100, 105, 110]) }) };
+    if (u.includes('/market-quote/quotes')) {
+      const keys = decodeURIComponent(u.split('instrument_key=')[1]).split(',');
+      const data = Object.fromEntries(keys.map((k, i) => [`NSE_FO:X${i}`, { instrument_token: k, last_price: 101, oi: 1100, volume: 50, ohlc: { close: 100 } }]));
+      return { ok: true, status: 200, json: async () => ({ status: 'success', data }) };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  assert.equal((await call(oiApi)).status, 401);
+  const { token } = auth.issueToken();
+  const h = { authorization: `Bearer ${token}` };
+  const ok = await call(oiApi, { headers: h });
+  assert.equal(ok.status, 200);
+  assert.ok(ok.json.count > 150, `count ${ok.json.count}`);
+  assert.equal(ok.json.indices['NIFTY 50'].pcr > 0, true);
+  assert.equal(ok.json.stocks.RELIANCE.futLive, 101);
+  assert.equal(ok.json.stocks.RELIANCE.futOiLive, 1100);
+  assert.match(calls.find((c) => c.includes('/option/chain')), /expiry_date=\d{4}-\d{2}-\d{2}/);
+  // chain endpoint
+  const bad = await new Promise((resolve) => {
+    const res = { statusCode: 200, setHeader() {}, end(t) { resolve({ status: this.statusCode, json: JSON.parse(t) }); } };
+    chainApi({ method: 'GET', url: '/api/chain?s=NOTREAL', headers: h }, res);
+  });
+  assert.equal(bad.status, 400);
+  const ch = await new Promise((resolve) => {
+    const res = { statusCode: 200, setHeader() {}, end(t) { resolve({ status: this.statusCode, json: JSON.parse(t) }); } };
+    chainApi({ method: 'GET', url: '/api/chain?s=reliance', headers: h }, res);
+  });
+  assert.equal(ch.status, 200);
+  assert.equal(ch.json.atm, 100);
+  assert.equal(ch.json.rows[0].length, 9);
+  // a refused token is reported, not hidden
+  oiLib.resetOiCache();
+  global.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
+  const refused = await call(oiApi, { headers: h });
+  assert.equal(refused.status, 502);
+  assert.equal(refused.json.error, 'UPSTOX_TOKEN_INVALID');
+});

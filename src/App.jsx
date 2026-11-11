@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { loadSettings, saveSettings } from './lib/settings.js';
 import { analyseAll, marketBreadth, sectorStats } from './lib/signals.js';
 import { ageText, hoursSince } from './lib/fmt.js';
-import { applyBook, applyIntraday } from './lib/live.js';
-import { fetchLive, fetchIntraday, probe, pollMs, hasToken, clearToken, marketOpenNow, marketPhaseNow } from './lib/liveApi.js';
+import { applyBook, applyIntraday, applyOi } from './lib/live.js';
+import { fetchLive, fetchIntraday, fetchOi, probe, pollMs, hasToken, clearToken, marketOpenNow, marketPhaseNow } from './lib/liveApi.js';
 import { logout, LOGIN_ENABLED } from './lib/auth.js';
 import Dashboard from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
@@ -45,6 +45,7 @@ export default function App() {
   const [picked, setPicked] = useState(null);
   const [live, setLive] = useState(null);
   const [intra, setIntra] = useState(null);
+  const [oi, setOi] = useState(null);
   const [sectorFilter, setSectorFilter] = useState('');
   const [theme, setTheme] = useState(() => {
     try {
@@ -179,6 +180,29 @@ export default function App() {
     };
   }, [authed]);
 
+  // Live option chains + futures OI: every 5 minutes while the market is open, once otherwise.
+  useEffect(() => {
+    if (import.meta.env.DEV || !authed || (LOGIN_ENABLED && !hasToken())) return undefined;
+    let timer = null;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      if (document.visibilityState === 'visible') {
+        const body = await fetchOi();
+        if (stopped) return;
+        if (body) setOi(body);
+      }
+      if (marketOpenNow()) timer = setTimeout(tick, 5 * 60000);
+    };
+    probe().then((p) => {
+      if (!stopped && p.available && p.live) tick();
+    });
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [authed]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try {
@@ -208,7 +232,9 @@ export default function App() {
     [settings, updateSettings],
   );
 
-  const book = useMemo(() => (data ? applyIntraday(applyBook(data, live), intra) : null), [data, live, intra]);
+  const book = useMemo(() => (data ? applyOi(applyIntraday(applyBook(data, live), intra), oi, data.meta?.foDate) : null), [data, live, intra, oi]);
+  // live OI applies only while the file's NSE F&O date is older than the live session
+  const oiLive = Boolean(oi?.day && data?.meta && (!data.meta.foDate || data.meta.foDate < oi.day));
 
   const rows = useMemo(() => {
     if (!book || !settings) return [];
@@ -332,7 +358,7 @@ export default function App() {
             <summary>
               {live.source === 'yahoo' ? 'Live prices (Yahoo)' : 'Upstox live prices'} · {live.mapped} stocks
               {intra?.count ? ` · intraday indicators every 2 min` : ''}
-              {meta.foDate ? ` · OI: NSE close ${meta.foDate}` : ''}
+              {oiLive ? ` · OI live (Upstox, every 5 min)` : meta.foDate ? ` · OI: NSE close ${meta.foDate}` : ''}
               {live.stale ? ' · showing last good prices' : ''}
             </summary>
             <p>
@@ -367,7 +393,7 @@ export default function App() {
         )}
 
         {tab === 'dashboard' && <Dashboard rows={rows} indices={book.indices} breadth={breadth} sectors={sectors} onOpen={setPicked} onGoScreener={openSector} onGoSheet={openSheet} settings={settings} meta={meta} />}
-        {tab === 'scanners' && <Scanners rows={rows} indices={book.indices} sectors={sectors} settings={settings} onOpen={setPicked} onSector={openSector} meta={meta} />}
+        {tab === 'scanners' && <Scanners rows={rows} indices={book.indices} sectors={sectors} settings={settings} onOpen={setPicked} onSector={openSector} meta={meta} oiInfo={oiLive ? oi : null} />}
         {tab === 'screener' && (
           <Screener rows={rows} sectors={sectors} initialSector={sectorFilter} watchlist={settings.watchlist || []} onOpen={setPicked} onToggleWatch={toggleWatch} />
         )}

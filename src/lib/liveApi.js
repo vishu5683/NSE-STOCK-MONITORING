@@ -127,6 +127,28 @@ export async function fetchCandles(symbol) {
   }
 }
 
+// Live Upstox F&O layer (option-chain summary + near-month futures) for all F&O stocks. null when unavailable.
+export async function fetchOi() {
+  const token = read();
+  try {
+    const { res, body } = await jsonFetch('./api/oi', token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 28000);
+    return res.ok && body?.stocks ? body : null;
+  } catch {
+    return null;
+  }
+}
+
+// Live strike-wise chain for one F&O symbol (popup). null on static hosting or any failure.
+export async function fetchChainLive(symbol) {
+  const token = read();
+  try {
+    const { res, body } = await jsonFetch(`./api/chain?s=${encodeURIComponent(symbol)}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 12000);
+    return res.ok && Array.isArray(body?.rows) ? body : null;
+  } catch {
+    return null;
+  }
+}
+
 // NSE cash session in IST, Mon-Fri 09:15-15:30. Poll fast while it is open, slowly otherwise.
 export function marketOpenNow(now = new Date()) {
   const ist = new Date(now.getTime() + 5.5 * 3600 * 1000);

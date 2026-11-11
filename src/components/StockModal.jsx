@@ -29,7 +29,7 @@ function Levels({ s }) {
           </div>
         ))}
       </div>
-      <p className="muted small">Pivots and previous high / low are from the last session. OI walls and max pain are NSE end-of-day.</p>
+      <p className="muted small">Pivots and previous high / low are from the last session. OI walls and max pain: {s.oiLive ? 'live Upstox option chain' : 'NSE end-of-day'}.</p>
     </div>
   );
 }
@@ -187,9 +187,9 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
             {dec(s.mwplPct, 1)}% {s.inBan ? <span className="ban-chip">BAN</span> : s.mwplPct >= 80 ? <span className="warn-t">near ban</span> : null}
           </Stat>
         )}
-        {isNum(s.pcr) && <Stat label="PCR (EOD)">{pcrSentiment(s.pcr).label}</Stat>}
-        {s.futBuildup && <Stat label="Futures build-up (EOD)">{s.futBuildup}</Stat>}
-        {isNum(s.iv) && <Stat label="ATM IV (EOD)">{dec(s.iv, 1)}%</Stat>}
+        {isNum(s.pcr) && <Stat label={`PCR (${s.oiLive ? 'live' : 'EOD'})`}>{pcrSentiment(s.pcr).label}</Stat>}
+        {s.futBuildup && <Stat label={`Futures build-up (${s.oiLive ? 'live' : 'EOD'})`}>{s.futBuildup}</Stat>}
+        {isNum(s.iv) && <Stat label={`ATM IV (${s.oiLive ? 'live' : 'EOD'})`}>{dec(s.iv, 1)}%</Stat>}
         {isNum(s.orbHigh) && <Stat label="Opening range (15 min)">{orbStatus(s).label}</Stat>}
         {isNum(s.pdh) && <Stat label="Vs previous day">{pdStatus(s).label}</Stat>}
         {isNum(s.dayOpen) && <Stat label="Open">{gapLabel(s).label}</Stat>}

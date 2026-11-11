@@ -30,6 +30,7 @@ import {
 } from '../lib/intraday.js';
 import { exportTable } from '../lib/exporters.js';
 import { DOWNLOADS_ENABLED } from '../lib/features.js';
+import { fetchChainLive } from '../lib/liveApi.js';
 
 // Same tabs, same order as the client's Google Sheet.
 const VIEWS = [
@@ -288,7 +289,7 @@ const CHG = { label: 'Chg %', x: (r) => r.chg, cell: (r) => <Change value={r.chg
 const MATCH = { label: 'Settings Match', x: (r) => r.match.label, cell: (r) => <Tag v={r.match} />, str: true };
 const LOT = { label: 'Lot', x: (r) => r.lot, cell: (r) => int(r.lot), cls: 'num', hide: 'md' };
 
-export default function Scanners({ rows, indices, sectors, settings, onOpen, onSector, meta }) {
+export default function Scanners({ rows, indices, sectors, settings, onOpen, onSector, meta, oiInfo }) {
   const [view, setView] = useState(() => {
     try {
       const v = localStorage.getItem(VIEW_KEY);
@@ -389,7 +390,9 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
     fno: enriched.filter((r) => has(r.futOi)).length,
     lastBar: enriched.map((r) => r.iAsOf).filter(Boolean).sort().pop(),
   };
-  const eod = meta.foDate ? `NSE end-of-day ${meta.foDate}` : 'not loaded';
+  const oiTime = oiInfo?.asOf ? new Date(oiInfo.asOf).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : null;
+  const eod = oiInfo ? `live Upstox option chain (updated ${oiTime}, every 5 min)` : meta.foDate ? `NSE end-of-day ${meta.foDate}` : 'not loaded';
+  const oiTag = oiInfo ? 'live' : 'EOD';
 
   return (
     <>
@@ -399,7 +402,7 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
         <div className="stat t-down"><span>🔴 Intraday SELL</span><strong className="down-t">{stats.sell}</strong></div>
         <div className="stat t-warn"><span>⏸ No-trade (CPR)</span><strong className="warn-t">{stats.noTrade}</strong></div>
         <div className="stat"><span>🕒 Last 5-min candle</span><strong>{stats.lastBar ? stats.lastBar.slice(11) : '-'}</strong></div>
-        <div className="stat"><span>📦 F&O data (EOD)</span><strong>{meta.foDate ? `${stats.fno} · ${shortDate(meta.foDate)}` : '-'}</strong></div>
+        <div className="stat"><span>📦 F&O data ({oiTag})</span><strong>{oiInfo ? `${stats.fno} · ${oiTime}` : meta.foDate ? `${stats.fno} · ${shortDate(meta.foDate)}` : '-'}</strong></div>
       </div>
       {matched.length > 0 && (
         <details className="small muted match-line">
@@ -507,7 +510,7 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
             key="active"
           />
         )}
-        {view === 'index' && <IndexOptions indices={indices} c={c} onChain={setChainOf} meta={meta} />}
+        {view === 'index' && <IndexOptions indices={indices} c={c} onChain={setChainOf} meta={meta} oiTag={oiTag} />}
         {view === 'fno' && (
           <Grid
             title="F&O Screener"
@@ -574,7 +577,7 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
         )}
         {view === 'futures' && (
           <>
-            <p className="small muted tab-note">Futures price, OI and build-up from the {eod}. Spot is live.</p>
+            <p className="small muted tab-note">Futures price, OI and build-up: {eod}.{oiInfo ? ' OI change is against the previous NSE close.' : ' Spot is live.'}</p>
             <Grid
               title="Futures Data"
               ctx={ctx}
@@ -963,7 +966,7 @@ function StockHeatmap({ rows, sectors, onSector, onOpen, ctx }) {
   );
 }
 
-function IndexOptions({ indices, c, onChain, meta }) {
+function IndexOptions({ indices, c, onChain, meta, oiTag = 'EOD' }) {
   const list = indices.filter((ix) => ix.name !== 'INDIA VIX');
   const vix = indices.find((ix) => ix.name === 'INDIA VIX');
   if (!list.length) return <Empty>No index data.</Empty>;
@@ -989,10 +992,10 @@ function IndexOptions({ indices, c, onChain, meta }) {
                 <div className="stat"><span>EMA 9 / 15 (5m)</span><strong>{price(ix.ema9i)} / {price(ix.ema15i)}</strong></div>
                 <div className="stat"><span>RSI (5-min)</span><strong>{dec(ix.rsiI, 1)}</strong></div>
                 <div className="stat"><span>ATM</span><strong>{num0(s.atm)}</strong></div>
-                <div className="stat"><span>PCR (EOD)</span><strong className={toneClass(sent.tone)}>{dec(ix.pcr, 2)}</strong></div>
-                <div className="stat"><span>Max pain (EOD)</span><strong>{num0(ix.maxPain)}</strong></div>
+                <div className="stat"><span>PCR ({oiTag})</span><strong className={toneClass(sent.tone)}>{dec(ix.pcr, 2)}</strong></div>
+                <div className="stat"><span>Max pain ({oiTag})</span><strong>{num0(ix.maxPain)}</strong></div>
                 <div className="stat"><span>OI support / resistance</span><strong>{num0(ix.putOiSup)} / {num0(ix.callOiRes)}</strong></div>
-                <div className="stat"><span>ATM IV (EOD)</span><strong>{has(ix.iv) ? `${dec(ix.iv, 1)}%` : ix.name === 'SENSEX' ? 'BSE: n/a' : '-'}</strong></div>
+                <div className="stat"><span>ATM IV ({oiTag})</span><strong>{has(ix.iv) ? `${dec(ix.iv, 1)}%` : ix.name === 'SENSEX' ? 'BSE: n/a' : '-'}</strong></div>
               </div>
               <p className={`bias ${s.bias.startsWith('BULL') ? 'up-t' : s.bias.startsWith('BEAR') ? 'down-t' : 'muted'}`}>{s.bias}</p>
               <p className="master">
@@ -1092,10 +1095,26 @@ function useChains() {
   return state;
 }
 
+// live chain from Upstox when the server has it, else the NSE end-of-day chain file
+function useLiveChain(symbol) {
+  const [live, setLive] = useState({ loading: true });
+  useEffect(() => {
+    let off = false;
+    fetchChainLive(symbol).then((d) => !off && setLive({ data: d }));
+    return () => {
+      off = true;
+    };
+  }, [symbol]);
+  return live;
+}
+
 function ChainModal({ symbol, rows, indices, onClose }) {
-  const chain = useChains();
+  const eodChain = useChains();
+  const liveChain = useLiveChain(symbol);
   const row = rows.find((r) => r.s === symbol) || indices.find((i) => i.name === symbol);
-  const ch = chain.data?.chains?.[symbol];
+  const isLive = Boolean(liveChain.data);
+  const ch = liveChain.data || (liveChain.loading ? null : eodChain.data?.chains?.[symbol]);
+  const chain = isLive ? { data: { date: 'live' } } : eodChain;
   const maxOi = ch ? Math.max(1, ...ch.rows.flatMap((r) => [r[1], r[7]])) : 1;
   const spot = row?.ltp;
   return (
@@ -1104,7 +1123,11 @@ function ChainModal({ symbol, rows, indices, onClose }) {
         <div>
           <h2>{symbol} option chain</h2>
           <p className="muted small">
-            {ch ? `Expiry ${ch.expiry} · NSE close ${chain.data.date} · spot then ${price(ch.spot)}` : chain.error || 'Loading…'}
+            {ch
+              ? isLive
+                ? `Expiry ${ch.expiry} · live Upstox chain, ${new Date(ch.asOf).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })} · spot ${price(ch.spot)}`
+                : `Expiry ${ch.expiry} · NSE close ${chain.data.date} · spot then ${price(ch.spot)}`
+              : chain.error || 'Loading…'}
             {has(spot) ? ` · live ${price(spot)}` : ''}
           </p>
         </div>

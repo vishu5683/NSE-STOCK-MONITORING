@@ -60,3 +60,29 @@ test('previous-session levels: official file values win on the same day, live va
   assert.equal(old.stocks[0].pdh, 388);
   assert.equal(old.stocks[0].cprBc, 384.55);
 });
+
+import { applyOi } from './live.js';
+
+test('live OI overlays option and futures fields while the NSE end-of-day file is older', () => {
+  const data = { stocks: [{ s: 'A', ltp: 100, pcr: 0.7, futOi: 1000, futPrice: 99, futBuildup: 'SHORT BUILDUP', maxPain: 90 }, { s: 'B', pcr: 1.1 }], indices: [{ name: 'NIFTY 50', pcr: 1 }] };
+  const oi = { day: '2026-11-12', asOf: '2026-11-12T05:00:00Z', stocks: { A: { pcr: 1.3, maxPain: 95, callOiRes: 110, futLive: 101, futOiLive: 1100, futCp: 100 } }, indices: { 'NIFTY 50': { pcr: 1.2 } } };
+  const out = applyOi(data, oi, '2026-11-11');
+  const a = out.stocks[0];
+  assert.equal(a.pcr, 1.3);
+  assert.equal(a.maxPain, 95);
+  assert.equal(a.futPrice, 101);
+  assert.equal(a.futOi, 1100);
+  assert.equal(a.futOiChg, 100);
+  assert.equal(a.futOiChgPct, 10);
+  assert.equal(a.futBasis, 1);
+  assert.equal(a.futBuildup, 'LONG BUILDUP');
+  assert.equal(a.oiLive, true);
+  assert.equal(out.stocks[1].pcr, 1.1);
+  assert.equal(out.stocks[1].oiLive, undefined);
+  assert.equal(out.indices[0].pcr, 1.2);
+  // evening: the file has today's official numbers, live is ignored
+  assert.equal(applyOi(data, oi, '2026-11-12'), data);
+  assert.equal(applyOi(data, null, '2026-11-11'), data);
+  // price down, OI up = short build-up
+  assert.equal(applyOi(data, { ...oi, stocks: { A: { futLive: 98, futOiLive: 1200, futCp: 100 } } }, '2026-11-11').stocks[0].futBuildup, 'SHORT BUILDUP');
+});

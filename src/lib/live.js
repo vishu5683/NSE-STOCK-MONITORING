@@ -76,3 +76,44 @@ export function applyIntraday(data, intra) {
     indices: data.indices.map((i) => overlay(i, intra.indices?.[i.name])),
   };
 }
+
+// Overlay the live Upstox F&O layer (/api/oi). Used only while the data file's NSE end-of-day F&O date
+// is older than the live day: once the evening NSE files are in, the official end-of-day values win.
+const OI_KEYS = ['pcr', 'callOiRes', 'putOiSup', 'callWriting', 'callWritingOi', 'putWriting', 'putWritingOi', 'maxPain', 'step', 'iv', 'optExpiry', 'ceOi', 'peOi'];
+
+function overlayOi(row, x, at) {
+  if (!x) return row;
+  const next = { ...row };
+  for (const k of OI_KEYS) if (x[k] !== undefined && x[k] !== null) next[k] = x[k];
+  if (isNum(x.futLive)) {
+    const eodOi = row.futOi; // previous session (bhavcopy)
+    next.futPrice = x.futLive;
+    next.futExpiry = x.futExpiry || row.futExpiry;
+    if (isNum(row.ltp)) next.futBasis = round2(x.futLive - row.ltp);
+    if (isNum(x.futOiLive)) {
+      next.futOi = x.futOiLive;
+      if (isNum(eodOi) && eodOi > 0) {
+        next.futOiChg = x.futOiLive - eodOi;
+        next.futOiChgPct = round2(((x.futOiLive - eodOi) / eodOi) * 100);
+      }
+    }
+    const up = isNum(x.futCp) ? x.futLive >= x.futCp : null;
+    const oiUp = isNum(next.futOiChg) ? next.futOiChg > 0 : null;
+    if (up !== null && oiUp !== null && next.futOiChg !== 0) {
+      next.futBuildup = up && oiUp ? 'LONG BUILDUP' : !up && oiUp ? 'SHORT BUILDUP' : up ? 'SHORT COVERING' : 'LONG UNWINDING';
+    }
+  }
+  next.oiLive = true;
+  next.oiAt = at;
+  return next;
+}
+
+export function applyOi(data, oi, foDate) {
+  if (!data || !oi?.stocks || !oi.day) return data;
+  if (foDate && foDate >= oi.day) return data; // file already has this session's official NSE numbers
+  return {
+    ...data,
+    stocks: data.stocks.map((s) => overlayOi(s, oi.stocks[s.s], oi.asOf)),
+    indices: data.indices.map((i) => overlayOi(i, oi.indices?.[i.name], oi.asOf)),
+  };
+}
