@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { loadSettings, saveSettings } from './lib/settings.js';
 import { analyseAll, marketBreadth, sectorStats } from './lib/signals.js';
 import { ageText, hoursSince } from './lib/fmt.js';
+import { applyBook } from './lib/live.js';
+import { fetchLive, probe, pollMs, hasToken, clearToken } from './lib/liveApi.js';
+import { logout, LOGIN_ENABLED } from './lib/auth.js';
 import Dashboard, { SectorHeatmap } from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
 import Reports from './components/Reports.jsx';
@@ -32,6 +35,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [tab, setTab] = useState(tabFromHash());
   const [picked, setPicked] = useState(null);
+  const [live, setLive] = useState(null);
   const [sectorFilter, setSectorFilter] = useState('');
   const [theme, setTheme] = useState(() => {
     try {
@@ -79,6 +83,71 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!import.meta.env.DEV || !authed) return undefined;
+    const es = new EventSource('/api/upstox/stream');
+    es.onmessage = (ev) => {
+      try {
+        setLive(JSON.parse(ev.data));
+      } catch {
+        /* ignore a bad frame */
+      }
+    };
+    return () => es.close();
+  }, [authed]);
+
+  // Production live prices: poll the signed-in /api/quotes. Quietly absent on static hosting.
+  useEffect(() => {
+    if (import.meta.env.DEV || !authed || (LOGIN_ENABLED && !hasToken())) return undefined;
+    let timer = null;
+    let stopped = false;
+    let misses = 0;
+    const tick = async () => {
+      if (stopped) return;
+      if (document.visibilityState === 'visible') {
+        const r = await fetchLive();
+        if (stopped) return;
+        if (r.needsLogin) {
+          setLive({ authed: false, connected: false, message: 'The live server asks for a login. Set LOGIN_ENABLED to true, or remove SITE_PASSWORD on the server.' });
+          return;
+        }
+        if (r.expired) {
+          clearToken();
+          logout();
+          setAuthed(false);
+          return;
+        }
+        if (r.state) {
+          misses = 0;
+          setLive(r.state);
+        } else {
+          misses += 1;
+          setLive((cur) => ({ ...(cur || {}), authed: true, connected: false, message: r.error }));
+        }
+      }
+      // back off while the service is failing (10s, 20s, 40s ... up to 60s)
+      const wait = misses ? Math.min(60000, pollMs() * 2 ** Math.min(misses, 4)) : pollMs();
+      timer = setTimeout(tick, wait);
+    };
+    // static hosting has no /api: do not poll a 404 forever
+    probe().then((p) => {
+      if (stopped) return;
+      if (p.available && p.live) tick();
+    });
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && timer) {
+        clearTimeout(timer);
+        tick();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [authed]);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try {
       localStorage.setItem('nsestocks.theme', theme);
@@ -107,14 +176,16 @@ export default function App() {
     [settings, updateSettings],
   );
 
+  const book = useMemo(() => (data ? applyBook(data, live) : null), [data, live]);
+
   const rows = useMemo(() => {
-    if (!data || !settings) return [];
+    if (!book || !settings) return [];
     const hidden = new Set(settings.hidden || []);
     return analyseAll(
-      data.stocks.filter((s) => !hidden.has(s.s)),
+      book.stocks.filter((s) => !hidden.has(s.s)),
       settings.screener,
     );
-  }, [data, settings]);
+  }, [book, settings]);
 
   const breadth = useMemo(() => marketBreadth(rows), [rows]);
   const sectors = useMemo(() => sectorStats(rows), [rows]);
@@ -134,6 +205,11 @@ export default function App() {
           <p className="muted small">
             Run <code>npm run data</code> once to create <code>public/data/latest.json</code>, or check that the data workflow has run.
           </p>
+          {import.meta.env.DEV && (
+            <p className="muted small">
+              Live prices need that file plus an Upstox login. <a href="/api/upstox/login">Log in to Upstox</a>
+            </p>
+          )}
           <button className="btn primary" onClick={load}>
             Try again
           </button>
@@ -152,7 +228,8 @@ export default function App() {
 
   const meta = data.meta;
   const stale = hoursSince(meta.generatedAt) > 96;
-  const ctx = { rows, indices: data.indices, sectors, breadth, meta, settings };
+  const ctx = { rows, indices: book.indices, sectors, breadth, meta, settings };
+  const liveOn = Boolean(live?.connected);
   const watched = picked ? (settings.watchlist || []).includes(picked.s) : false;
   const openSector = (sec) => {
     setSectorFilter(sec);
@@ -184,10 +261,10 @@ export default function App() {
           ))}
         </nav>
         <div className="topright">
-          <div className="status" title={meta.source}>
-            <span className={`dot ${stale ? 'warn' : 'ok'}`} />
+          <div className="status" title={liveOn ? 'Upstox live price' : meta.source}>
+            <span className={`dot ${liveOn ? 'ok' : stale ? 'warn' : 'ok'}`} />
             <span>
-              {meta.lastTradingDate} · {ageText(meta.generatedAt)}
+              {liveOn ? `Upstox live · ${ageText(live.updatedAt) || 'now'}` : `${meta.lastTradingDate} · ${ageText(meta.generatedAt)}`}
             </span>
           </div>
           <button className="btn ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">
@@ -198,8 +275,27 @@ export default function App() {
 
       <main className="content">
         <div className="data-strip">
-          <span className={`dot ${stale ? 'warn' : 'ok'}`} /> Data {meta.lastTradingDate} · updated {ageText(meta.generatedAt)} · {meta.marketPhase}
+          <span className={`dot ${liveOn ? 'ok' : stale ? 'warn' : 'ok'}`} />{' '}
+          {liveOn ? `Upstox live · ${ageText(live.updatedAt) || 'now'}` : `Data ${meta.lastTradingDate} · updated ${ageText(meta.generatedAt)}`} · {meta.marketPhase}
         </div>
+        {import.meta.env.DEV && live && !live.authed && (
+          <div className="banner warn">
+            {live.message}{' '}
+            {live.configured && (
+              <a href="/api/upstox/login">Log in to Upstox</a>
+            )}
+          </div>
+        )}
+        {import.meta.env.DEV && live?.authed && !live.connected && live.message && <div className="banner warn">{live.message}</div>}
+        {liveOn && (
+          <div className={`banner ${live.stale || live.partial ? 'warn' : 'info'}`}>
+            Upstox live prices are on ({live.mapped} symbols). RSI, EMA, ADX and volume spike still come from the last daily candle.
+            {live.unmapped?.length > 0 ? ` No Upstox key for: ${live.unmapped.join(', ')}.` : ''}
+            {live.stale ? ` Showing the last good prices: ${live.warning}` : ''}
+            {live.partial && !live.stale ? ' Some prices could not be refreshed this round.' : ''}
+          </div>
+        )}
+        {!import.meta.env.DEV && live && !live.connected && live.message && <div className="banner warn">Live prices paused: {live.message}</div>}
         {meta.health?.some((h) => !h.ok) && (
           <div className="banner warn">
             Data check warning:{' '}
@@ -217,7 +313,7 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'dashboard' && <Dashboard rows={rows} indices={data.indices} breadth={breadth} sectors={sectors} onOpen={setPicked} onGoScreener={openSector} />}
+        {tab === 'dashboard' && <Dashboard rows={rows} indices={book.indices} breadth={breadth} sectors={sectors} onOpen={setPicked} onGoScreener={openSector} />}
         {tab === 'screener' && (
           <Screener rows={rows} sectors={sectors} initialSector={sectorFilter} watchlist={settings.watchlist || []} onOpen={setPicked} onToggleWatch={toggleWatch} />
         )}
@@ -265,7 +361,7 @@ export default function App() {
           </>
         )}
         {tab === 'reports' && <Reports ctx={ctx} />}
-        {tab === 'admin' && <Admin settings={settings} onChange={updateSettings} meta={meta} universe={data.stocks.map((s) => s.s)} stocks={data.stocks} />}
+        {tab === 'admin' && <Admin settings={settings} onChange={updateSettings} meta={meta} universe={book.stocks.map((s) => s.s)} stocks={book.stocks} />}
       </main>
 
       <footer className="footer">

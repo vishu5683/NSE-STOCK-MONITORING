@@ -1,0 +1,36 @@
+syntax = "proto3";
+package com.upstox.marketdatafeederv3udapi.rpc.proto;
+
+// Fields we read from the public V3 market feed. Unknown fields are ignored.
+message LTPC {
+  double ltp = 1;
+  int64 ltt = 2;
+  int64 ltq = 3;
+  double cp = 4;
+}
+
+message Feed {
+  oneof FeedUnion {
+    LTPC ltpc = 1;
+  }
+  RequestMode requestMode = 4;
+}
+
+enum RequestMode {
+  ltpc = 0;
+  full_d5 = 1;
+  option_greeks = 2;
+  full_d30 = 3;
+}
+
+enum Type {
+  initial_feed = 0;
+  live_feed = 1;
+  market_info = 2;
+}
+
+message FeedResponse {
+  Type type = 1;
+  map<string, Feed> feeds = 2;
+  int64 currentTs = 3;
+}

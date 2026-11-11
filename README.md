@@ -37,6 +37,17 @@ No live option chain and no intraday VWAP: there is no free reliable source, so 
 1. Import the same GitHub repo in Vercel. Framework: Vite (detected from `vercel.json`).
 2. The workflow commits fresh `public/data/latest.json` after each refresh, and Vercel redeploys automatically.
 
+## Live prices (production, free)
+GitHub Pages is static, so it can only show the daily data. For **live prices** deploy on Vercel (free). It runs a small backend in `api/` that keeps the Upstox token on the server and gives prices only to signed-in visitors.
+
+1. Upstox: Developer Apps > your app > **Analytics** tab > generate the **Analytics Token** (read-only, valid 1 year, no static IP needed for market data). Only one is active per account; generating a new one revokes the old one.
+2. Vercel: New Project > import this GitHub repo. In Settings > Environment Variables add `UPSTOX_ANALYTICS_TOKEN`, `SITE_PASSWORD` (the client's sign-in password) and `SESSION_SECRET` (long random text, see `.env.example`). Deploy.
+3. Open the site, sign in. The top bar changes to "Upstox live", prices refresh every 5 seconds during market hours (every 60 seconds otherwise).
+4. Once a year: generate a new Analytics Token and update `UPSTOX_ANALYTICS_TOKEN`. If it is rejected, the site shows "Live prices paused" and keeps the daily data.
+
+Without those variables (or on GitHub Pages) the site works exactly as before on daily data.
+Run `npm test` before deploying. `npm run instruments` rebuilds the symbol to Upstox key map after you add stocks to `universe.csv`.
+
 ## Change the client name, colours, thresholds for everyone
 Admin > Export settings, paste the JSON into `public/config.json`, commit and push.
 

@@ -6,6 +6,10 @@
 // private client data behind it. For real protection add a backend (e.g. Vercel serverless function
 // or Cloudflare Access) in front of the site.
 
+// Sign-in screen switch. false = the site opens straight to the dashboard (login code stays below, unused).
+// Set to true to bring the password screen back. For the live API also set SITE_PASSWORD on the server.
+export const LOGIN_ENABLED = false;
+
 const ADMIN_PASSWORD = 'Vishu@4321';
 const SESSION_KEY = 'nsestocks.admin';
 const LOCK_KEY = 'nsestocks.lock';
@@ -28,7 +32,7 @@ function write(key, value) {
   }
 }
 
-export const isAdmin = () => read(SESSION_KEY) === '1';
+export const isAdmin = () => !LOGIN_ENABLED || read(SESSION_KEY) === '1';
 
 export function lockedFor() {
   try {
@@ -65,4 +69,10 @@ export function login(password) {
 
 export function logout() {
   write(SESSION_KEY, null);
+}
+
+// Used when the server already checked the password (production API).
+export function grant() {
+  write(SESSION_KEY, '1');
+  write(LOCK_KEY, null);
 }

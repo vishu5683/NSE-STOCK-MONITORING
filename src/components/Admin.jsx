@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Card } from './ui.jsx';
-import { logout } from '../lib/auth.js';
+import { logout, LOGIN_ENABLED } from '../lib/auth.js';
 import { clearSavedSettings } from '../lib/settings.js';
 import { ageText } from '../lib/fmt.js';
 import { analyseAll } from '../lib/signals.js';
@@ -122,7 +122,7 @@ function Panel({ settings, onChange, meta, universe, stocks, onLogout }) {
         right={
           <div className="row gap">
             <button className="btn primary" onClick={save} disabled={errors.length > 0}>Save changes</button>
-            <button className="btn ghost" onClick={onLogout}>Sign out</button>
+            {LOGIN_ENABLED && <button className="btn ghost" onClick={onLogout}>Sign out</button>}
           </div>
         }
       >

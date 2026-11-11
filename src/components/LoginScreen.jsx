@@ -1,14 +1,31 @@
 import React, { useState } from 'react';
-import { login, lockedFor } from '../lib/auth.js';
+import { login, grant, lockedFor } from '../lib/auth.js';
+import { serverLogin } from '../lib/liveApi.js';
 
 export default function LoginScreen({ name, tagline, onDone }) {
   const [pw, setPw] = useState('');
   const [show, setShow] = useState(false);
   const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
   const locked = lockedFor() > 0;
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    // With the live backend the server checks the password (real security). Without it, the local check is used.
+    const server = await serverLogin(pw);
+    setBusy(false);
+    if (server.status === 'ok') {
+      grant();
+      onDone();
+      return;
+    }
+    if (server.status === 'wrong' || server.status === 'locked' || server.status === 'error') {
+      setMsg(server.message || 'Wrong password.');
+      setPw('');
+      return;
+    }
     const res = login(pw);
     if (res.ok) onDone();
     else {
@@ -57,8 +74,8 @@ export default function LoginScreen({ name, tagline, onDone }) {
             {msg}
           </p>
         )}
-        <button className="btn primary block signin-btn" type="submit" disabled={!pw || locked}>
-          Sign in
+        <button className="btn primary block signin-btn" type="submit" disabled={!pw || locked || busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
         </button>
         <p className="signin-foot">NSE F&amp;O screener · delayed data · not investment advice</p>
       </form>

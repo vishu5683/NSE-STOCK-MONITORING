@@ -4,4 +4,6 @@ __pycache__
 *.pyc
 .venv
 .env
+.upstox-token.json
+data-pipeline/cache/
 *.log

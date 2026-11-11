@@ -122,3 +122,17 @@ The PDF (header date 08-11-2026, a Sunday) is really the **6-Nov-2026 close**. O
 - In the PDF but NOT here, on purpose (no free reliable source): intraday VWAP and 9/15 EMA signals, index option scanner with premiums, option strike (ATM) column, futures price/basis/OI, PCR, call/put OI support and resistance, max pain.
 - Added after the comparison (v1.2): Rank, Conviction, Open/High/Low/Prev close, Value (Cr), Lot size, weekly and monthly status labels, 52-week breakout status, new Excel sheets Momentum and Breakouts.
 - Lot sizes in `data-pipeline/lot_sizes.csv` were copied from the PDF. NSE revises them, so refresh before any real use.
+
+## 13. Live prices (v2.0, 11-Nov-2026)
+- **Production = Vercel** (free). GitHub Pages is static and cannot hold a token, so there it stays on daily data. Same code works on both; the site detects `/api/health`.
+- `api/` (Vercel functions): `login.js` (server checks `SITE_PASSWORD`, returns a signed 12 h token, 5 wrong tries lock the IP for 60 s), `quotes.js` (needs that token, reads Upstox LTP v3 with `UPSTOX_ANALYTICS_TOKEN`, 6 calls of 50 keys, 4 s in-memory cache so Upstox is hit at most about 90 times a minute however many people watch, serves last good prices as `stale` for up to 5 min if Upstox fails), `health.js`. Env vars: `UPSTOX_ANALYTICS_TOKEN`, `SITE_PASSWORD`, `SESSION_SECRET`.
+- Upstox Analytics Token: read-only, valid 1 year, market quote needs no static IP (checked in Upstox docs on 11-Nov-2026). Only one active per account.
+- `api/_instruments.json` = symbol -> Upstox key (257 of 259; no key for ICICIPRULI, HFCL, they stay on daily data). Rebuild with `npm run instruments`.
+- Browser: `src/lib/liveApi.js` polls every 5 s in market hours, 60 s otherwise, backs off when failing, goes back to sign-in if the session expires. Local `npm run dev` still uses the WebSocket plugin in `server/` (OAuth login, token in `.upstox-token.json`, gitignored).
+- **Login screen is OFF for now**: `LOGIN_ENABLED = false` in `src/lib/auth.js` (code kept). The live API is open when `SITE_PASSWORD` is not set on the server. To bring login back: set `LOGIN_ENABLED = true` and set `SITE_PASSWORD` + `SESSION_SECRET` on Vercel.
+- With the API present and login on, the sign-in password is checked on the server (real security for prices). Without it the old client-side check is used.
+- Live only updates price, day change, 52W distance. RSI, EMA, ADX, volume spike, weekly/monthly status stay from the last daily candle.
+- Fixed a decoder bug in `server/decodeFeed.js` (frames with 2+ stocks were dropped), added reconnect backoff and cleanup to the dev plugin.
+- Tests: `npm test` (19 tests: decoder, live merge, API login/quotes/caching/failure modes, market hours). The workflow runs them before every deploy.
+- Verified with a simulated Vercel (real handlers, mocked Upstox) in headless Edge: wrong/right password, live banner and prices, Upstox down, rejected token, expired session, static fallback. NOT verified: a real Upstox response and a real Vercel deploy.
+- Caution: Upstox's API is meant for the account holder. Showing its prices to a paying client may need Upstox's permission or a licensed feed. Check their terms before selling.
