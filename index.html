@@ -11,6 +11,10 @@
     <meta name="description" content="NSE F&O stock screener: live dashboard, setups, sector heatmap, Excel and PDF reports." />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>NSE Stocks Pro</title>
+    <script>
+      // The GitHub Pages copy has no live API. Send visitors to the live site.
+      if (location.hostname.endsWith('github.io')) location.replace('https://nsestock-five.vercel.app/' + location.hash);
+    </script>
   </head>
   <body>
     <div id="root"></div>

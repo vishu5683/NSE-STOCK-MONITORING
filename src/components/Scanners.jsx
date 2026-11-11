@@ -1022,11 +1022,16 @@ function IndexOptions({ indices, c, onChain, meta, oiTag = 'EOD' }) {
 
 // ITM / ATM / OTM for each index from the real chain (last close premium of the EOD session)
 function IndexStrikes({ indices, c, meta }) {
-  const chain = useChains();
-  if (!chain.data) return <p className="small muted mt">{chain.error || 'Loading option premiums…'}</p>;
+  const eodChain = useChains();
+  const liveNifty = useLiveChain('NIFTY 50');
+  const liveBank = useLiveChain('BANK NIFTY');
+  const live = { 'NIFTY 50': liveNifty.data, 'BANK NIFTY': liveBank.data };
+  const anyLive = Boolean(live['NIFTY 50'] || live['BANK NIFTY']);
+  if (!anyLive && !eodChain.data) return <p className="small muted mt">{eodChain.error || 'Loading option premiums…'}</p>;
+  const chain = eodChain.data ? eodChain : { data: { date: '', chains: {} } };
   const rows = [];
   for (const ix of indices) {
-    const ch = chain.data.chains[ix.name];
+    const ch = live[ix.name] || chain.data.chains[ix.name];
     if (!ch) continue;
     const s = indexSignal(ix, c);
     const atm = s.atm;
@@ -1042,7 +1047,7 @@ function IndexStrikes({ indices, c, meta }) {
   return (
     <>
       <h3 className="sub">🎯 ITM, ATM & OTM strikes (CE & PE)</h3>
-      <p className="small muted tab-note">Premium = last close of the NSE session {chain.data.date}. ATM follows the live spot.</p>
+      <p className="small muted tab-note">{anyLive ? 'Premium = live Upstox option price.' : `Premium = last close of the NSE session ${chain.data.date}.`} ATM follows the live spot.</p>
       <div className="table-wrap">
         <table className="table">
           <thead>

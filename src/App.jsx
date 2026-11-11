@@ -375,6 +375,11 @@ export default function App() {
           </details>
         )}
         {!import.meta.env.DEV && live && !live.connected && live.message && <div className="banner warn">Live prices paused: {live.message}</div>}
+        {liveOn && live.source === 'yahoo' && live.fallbackReason && live.fallbackReason !== 'Upstox token is not set.' && (
+          <div className="banner warn">
+            Upstox is not answering ({live.fallbackReason}). Prices continue from Yahoo and OI shows the last NSE close. If this stays, generate a new Upstox Analytics Token and update UPSTOX_ANALYTICS_TOKEN in Vercel.
+          </div>
+        )}
         {meta.health?.some((h) => !h.ok) && (
           <div className="banner warn">
             Data check warning:{' '}
