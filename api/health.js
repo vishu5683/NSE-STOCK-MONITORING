@@ -6,7 +6,8 @@ import { stats } from './_lib/upstox.js';
 export default function handler(req, res) {
   send(res, 200, {
     ok: true,
-    live: Boolean(process.env.UPSTOX_ANALYTICS_TOKEN),
+    live: true,
+    upstoxConfigured: Boolean(process.env.UPSTOX_ANALYTICS_TOKEN),
     login: loginRequired() && configured(),
     instruments: stats,
   });

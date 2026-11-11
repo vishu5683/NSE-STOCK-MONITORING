@@ -261,10 +261,10 @@ export default function App() {
           ))}
         </nav>
         <div className="topright">
-          <div className="status" title={liveOn ? 'Upstox live price' : meta.source}>
+          <div className="status" title={liveOn ? (live.source === 'yahoo' ? 'Yahoo Finance prices' : 'Upstox live price') : meta.source}>
             <span className={`dot ${liveOn ? 'ok' : stale ? 'warn' : 'ok'}`} />
             <span>
-              {liveOn ? `Upstox live · ${ageText(live.updatedAt) || 'now'}` : `${meta.lastTradingDate} · ${ageText(meta.generatedAt)}`}
+              {liveOn ? `${live.source === 'yahoo' ? 'Live (Yahoo)' : 'Upstox live'} · ${ageText(live.updatedAt) || 'now'}` : `${meta.lastTradingDate} · ${ageText(meta.generatedAt)}`}
             </span>
           </div>
           <button className="btn ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">
@@ -276,7 +276,7 @@ export default function App() {
       <main className="content">
         <div className="data-strip">
           <span className={`dot ${liveOn ? 'ok' : stale ? 'warn' : 'ok'}`} />{' '}
-          {liveOn ? `Upstox live · ${ageText(live.updatedAt) || 'now'}` : `Data ${meta.lastTradingDate} · updated ${ageText(meta.generatedAt)}`} · {meta.marketPhase}
+          {liveOn ? `${live.source === 'yahoo' ? 'Live (Yahoo)' : 'Upstox live'} · ${ageText(live.updatedAt) || 'now'}` : `Data ${meta.lastTradingDate} · updated ${ageText(meta.generatedAt)}`} · {meta.marketPhase}
         </div>
         {import.meta.env.DEV && live && !live.authed && (
           <div className="banner warn">
@@ -289,7 +289,10 @@ export default function App() {
         {import.meta.env.DEV && live?.authed && !live.connected && live.message && <div className="banner warn">{live.message}</div>}
         {liveOn && (
           <div className={`banner ${live.stale || live.partial ? 'warn' : 'info'}`}>
-            Upstox live prices are on ({live.mapped} symbols). RSI, EMA, ADX and volume spike still come from the last daily candle.
+            {live.source === 'yahoo'
+              ? `Prices from Yahoo Finance (${live.mapped} symbols, unofficial feed, usually within a minute for NSE stocks, SENSEX about 15 minutes late).`
+              : `Upstox live prices are on (${live.mapped} symbols).`}{' '}
+            RSI, EMA, ADX and volume spike still come from the last daily candle.
             {live.unmapped?.length > 0 ? ` No Upstox key for: ${live.unmapped.join(', ')}.` : ''}
             {live.stale ? ` Showing the last good prices: ${live.warning}` : ''}
             {live.partial && !live.stale ? ' Some prices could not be refreshed this round.' : ''}

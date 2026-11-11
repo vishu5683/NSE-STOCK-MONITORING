@@ -11,6 +11,8 @@ const { default: health } = await import('../api/health.js');
 const upstox = await import('../api/_lib/upstox.js');
 const auth = await import('../api/_lib/auth.js');
 const instruments = (await import('../api/_instruments.json', { with: { type: 'json' } })).default;
+const yahoo = await import('../api/_lib/yahoo.js');
+const sources = await import('../api/quotes.js');
 
 function call(handler, { method = 'GET', headers = {}, body, ip = '1.1.1.1' } = {}) {
   return new Promise((resolve) => {
@@ -79,6 +81,7 @@ test('quotes: no token means 401 and Upstox is never called', async () => {
   const calls = [];
   global.fetch = fakeUpstream(calls);
   upstox.resetCache();
+  sources.resetSourceState();
   const r = await call(quotes);
   assert.equal(r.status, 401);
   assert.equal(calls.length, 0);
@@ -88,6 +91,7 @@ test('quotes: maps every instrument, splits into chunks, caches for a few second
   const calls = [];
   global.fetch = fakeUpstream(calls);
   upstox.resetCache();
+  sources.resetSourceState();
   const { token } = auth.issueToken();
   const h = { authorization: `Bearer ${token}` };
   const r = await call(quotes, { headers: h });
@@ -101,13 +105,16 @@ test('quotes: maps every instrument, splits into chunks, caches for a few second
   assert.equal(calls.length, Math.ceil((stockKeys.length + 4) / 50), 'second call inside the cache window must not hit Upstox');
 });
 
-test('quotes: a rejected token is reported clearly', async () => {
+test('quotes: when Upstox and Yahoo both fail, the Upstox token problem is reported clearly', async () => {
   global.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
   upstox.resetCache();
+  yahoo.resetYahooCache();
+  sources.resetSourceState();
   const { token } = auth.issueToken();
   const r = await call(quotes, { headers: { authorization: `Bearer ${token}` } });
   assert.equal(r.status, 502);
-  assert.equal(r.json.error, 'UPSTOX_TOKEN_INVALID');
+  assert.equal(r.json.error, 'NO_SOURCE');
+  assert.match(r.json.message, /Analytics Token/);
 });
 
 test('quotes: if Upstox fails after a good fetch, the last prices come back marked stale', async () => {
@@ -129,6 +136,7 @@ test('quotes: one failed chunk still returns the rest, marked partial', async ()
   const good = fakeUpstream(calls);
   global.fetch = async (u) => (n++ === 1 ? { ok: false, status: 500, json: async () => ({}) } : good(u));
   upstox.resetCache();
+  sources.resetSourceState();
   const { token } = auth.issueToken();
   const r = await call(quotes, { headers: { authorization: `Bearer ${token}` } });
   assert.equal(r.status, 200);
@@ -149,6 +157,7 @@ test('open mode: without SITE_PASSWORD the prices need no sign-in, and health sa
   try {
     global.fetch = fakeUpstream([]);
     upstox.resetCache();
+    sources.resetSourceState();
     const r = await call(quotes);
     assert.equal(r.status, 200);
     assert.ok(Object.keys(r.json.quotes).length > 100);
@@ -156,4 +165,84 @@ test('open mode: without SITE_PASSWORD the prices need no sign-in, and health sa
   } finally {
     process.env.SITE_PASSWORD = keep;
   }
+});
+
+function fakeYahoo(calls) {
+  return async (url) => {
+    calls.push(String(url));
+    const syms = decodeURIComponent(String(url).split('symbols=')[1].split('&')[0]).split(',');
+    assert.ok(syms.length <= 20, 'Yahoo rejects more than 20 symbols per call');
+    const body = {};
+    const now = Math.floor(Date.now() / 1000);
+    for (const s of syms) body[s] = { symbol: s, timestamp: [now - 300, now - 5], close: [100, 101.5], previousClose: 99, chartPreviousClose: 99 };
+    return { ok: true, status: 200, json: async () => body };
+  };
+}
+
+test('yahoo fallback: batches of 20, maps stocks and indices, reports lag', async () => {
+  const calls = [];
+  global.fetch = fakeYahoo(calls);
+  yahoo.resetYahooCache();
+  const p = await yahoo.getYahooQuotes();
+  assert.equal(Object.keys(p.quotes).length, stockKeys.length);
+  assert.equal(Object.keys(p.indices).length, 4);
+  assert.equal(p.quotes.RELIANCE.ltp, 101.5);
+  assert.equal(p.quotes.RELIANCE.cp, 99);
+  assert.equal(calls.length, Math.ceil((stockKeys.length + 4) / 20));
+  assert.ok(p.lagMin <= 1);
+});
+
+test('yahoo fallback: a null last bar falls back to the previous real price', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const out = yahoo.normaliseYahoo([{ 'RELIANCE.NS': { timestamp: [now - 120, now - 60], close: [1300, null], previousClose: 1290 } }]);
+  assert.equal(out.quotes.RELIANCE.ltp, 1300);
+});
+
+test('source order: no Upstox token means Yahoo answers and says why', async () => {
+  const keep = process.env.UPSTOX_ANALYTICS_TOKEN;
+  delete process.env.UPSTOX_ANALYTICS_TOKEN;
+  try {
+    global.fetch = fakeYahoo([]);
+    yahoo.resetYahooCache();
+    sources.resetSourceState();
+    const { token } = auth.issueToken();
+    const r = await call(sources.default, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.source, 'yahoo');
+    assert.match(r.json.fallbackReason, /not set/);
+  } finally {
+    process.env.UPSTOX_ANALYTICS_TOKEN = keep;
+  }
+});
+
+test('source order: a rejected Upstox token falls back to Yahoo, then Upstox is skipped for a while', async () => {
+  const upstoxCalls = [];
+  global.fetch = async (url, opts) => {
+    if (String(url).includes('upstox.com')) {
+      upstoxCalls.push(1);
+      return { ok: false, status: 401, json: async () => ({}) };
+    }
+    return fakeYahoo([])(url, opts);
+  };
+  upstox.resetCache();
+  yahoo.resetYahooCache();
+  sources.resetSourceState();
+  const { token } = auth.issueToken();
+  const h = { authorization: `Bearer ${token}` };
+  const a = await call(sources.default, { headers: h });
+  assert.equal(a.json.source, 'yahoo');
+  assert.match(a.json.fallbackReason, /Analytics Token/);
+  const before = upstoxCalls.length;
+  yahoo.resetYahooCache();
+  await call(sources.default, { headers: h });
+  assert.equal(upstoxCalls.length, before, 'Upstox must not be retried while it is blocked');
+});
+
+test('source order: when Upstox works it wins', async () => {
+  global.fetch = fakeUpstream([]);
+  upstox.resetCache();
+  sources.resetSourceState();
+  const { token } = auth.issueToken();
+  const r = await call(sources.default, { headers: { authorization: `Bearer ${token}` } });
+  assert.equal(r.json.source, 'upstox');
 });

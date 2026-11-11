@@ -26,7 +26,7 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
       <div className="modal-head">
         <div>
           <h2>{s.s}</h2>
-          <p className="muted">{s.sec} · {s.live ? 'Upstox live price' : `as of ${s.asOf}`}</p>
+          <p className="muted">{s.sec} · {s.live ? 'Live price' : `as of ${s.asOf}`}</p>
         </div>
         <div className="modal-price">
           <strong>₹{price(s.ltp)}</strong>

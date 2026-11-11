@@ -79,7 +79,7 @@ export async function fetchLive() {
     if (!res.ok || !body?.quotes) {
       return { error: body?.message || `Live prices unavailable (HTTP ${res.status}).` };
     }
-    const shape = (map) => Object.fromEntries(Object.entries(map || {}).map(([k, v]) => [k, { ltp: v.ltp, cp: v.cp, ts: body.asOf }]));
+    const shape = (map) => Object.fromEntries(Object.entries(map || {}).map(([k, v]) => [k, { ltp: v.ltp, cp: v.cp, ts: v.t || body.asOf }]));
     return {
       state: {
         configured: true,
@@ -92,6 +92,9 @@ export async function fetchLive() {
         stale: Boolean(body.stale),
         partial: Boolean(body.partial),
         warning: body.warning || '',
+        source: body.source || 'upstox',
+        lagMin: body.lagMin ?? null,
+        fallbackReason: body.fallbackReason || '',
         quotes: shape(body.quotes),
         indices: shape(body.indices),
       },

@@ -136,3 +136,9 @@ The PDF (header date 08-11-2026, a Sunday) is really the **6-Nov-2026 close**. O
 - Tests: `npm test` (19 tests: decoder, live merge, API login/quotes/caching/failure modes, market hours). The workflow runs them before every deploy.
 - Verified with a simulated Vercel (real handlers, mocked Upstox) in headless Edge: wrong/right password, live banner and prices, Upstox down, rejected token, expired session, static fallback. NOT verified: a real Upstox response and a real Vercel deploy.
 - Caution: Upstox's API is meant for the account holder. Showing its prices to a paying client may need Upstox's permission or a licensed feed. Check their terms before selling.
+
+## 14. Yahoo live fallback (11-Nov-2026)
+- `api/quotes.js` tries Upstox first, then Yahoo (`api/_lib/yahoo.js`, spark endpoint, max 20 symbols per call, 14 parallel calls, 15 s cache). A rejected Upstox token blocks Upstox for 10 minutes so requests do not waste calls. Response carries `source` (`upstox`|`yahoo`), `fallbackReason`, `lagMin`.
+- **Measured at 10:25 IST on 11-Nov-2026 (market open): Yahoo NSE stocks and indices were 0 minutes old; SENSEX was 16 minutes late.** An earlier note saying "Yahoo is 15 minutes delayed" was wrong for NSE. It is unofficial though, so it can change or throttle without notice, and Vercel server IPs may be treated differently from this PC. Not yet checked on a real Vercel deploy.
+- Upstox needs an active account (segments). The Basic plan showed "reactivate your account"; until that is done the site runs on Yahoo.
+- Tests: 25 (`npm test`).
