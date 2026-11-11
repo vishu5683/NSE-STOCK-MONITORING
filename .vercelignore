@@ -1,0 +1,3 @@
+# Not needed to build the site. The Python data refresh runs in GitHub Actions, not on Vercel.
+# Without this Vercel sees data-pipeline/requirements.txt and treats it as a separate Python project.
+data-pipeline
