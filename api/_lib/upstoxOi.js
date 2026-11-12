@@ -118,8 +118,16 @@ export function summarise(rows, spot, ivs, expiry) {
       pain = s;
     }
   }
-  const [civ, piv] = ivs.get(atm) || [];
-  const atmIvs = [civ, piv].filter((v) => isNum(v) && v > 0).map((v) => (v < 3 ? v * 100 : v)); // fraction or percent
+  // ATM IV = median of call and put IV at the ATM strike and its two neighbours. Thin strikes early in the
+  // session can report absurd IVs (e.g. 151%), so values outside 1-120% are dropped.
+  const ai = strikes.indexOf(atm);
+  const atmIvs = strikes
+    .slice(Math.max(0, ai - 1), ai + 2)
+    .flatMap((k) => ivs.get(k) || [])
+    .filter((v) => isNum(v) && v > 0)
+    .map((v) => (v < 3 ? v * 100 : v)) // fraction or percent
+    .filter((v) => v >= 1 && v <= 120)
+    .sort((x, y) => x - y);
   return {
     optExpiry: expiry,
     spotLive: r2(spot),
@@ -133,7 +141,7 @@ export function summarise(rows, spot, ivs, expiry) {
     maxPain: pain,
     atmLive: atm,
     step: gaps.length ? gaps[Math.floor(gaps.length / 2)] : null,
-    iv: atmIvs.length ? Math.round((atmIvs.reduce((a, b) => a + b, 0) / atmIvs.length) * 10) / 10 : null,
+    iv: atmIvs.length ? Math.round(atmIvs[Math.floor(atmIvs.length / 2)] * 10) / 10 : null,
     ceOi,
     peOi,
   };

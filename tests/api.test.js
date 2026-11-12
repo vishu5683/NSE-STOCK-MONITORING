@@ -366,7 +366,9 @@ test('option chain summary: PCR, OI walls, writing, max pain, ATM IV', () => {
   assert.equal(s.callOiRes, 110);
   assert.equal(s.putOiSup, 100);
   assert.equal(s.callWriting, 105); // 1000 + 105 rise vs 1000 + 110: same, first max wins
-  assert.equal(s.iv, 21);
+  assert.equal(s.iv, 22); // median of 20 / 22 around ATM
+  const odd = oiLib.chainRows(fakeChain(102, [90, 95, 100, 105, 110]).map((r) => (r.strike_price === 100 ? { ...r, call_options: { ...r.call_options, option_greeks: { iv: 151.4 } } } : r)));
+  assert.ok(oiLib.summarise(odd.rows, odd.spot, odd.ivs, 'x').iv <= 22, 'absurd IV dropped');
   assert.equal(s.pcr, Math.round((s.peOi / s.ceOi) * 100) / 100);
   assert.ok([90, 95, 100, 105, 110].includes(s.maxPain));
   assert.equal(oiLib.summarise([], 100, new Map(), 'x'), null);
