@@ -448,3 +448,23 @@ test('/api/depth: 5 levels, totals and circuit limits; bad symbol refused', asyn
   assert.equal((await run('/api/depth?s=..%2Fx')).status, 400);
   assert.equal((await run('/api/depth?s=NOTASTOCK')).status, 404);
 });
+
+test('supertrend, bollinger, stochastic and 15-minute candles', () => {
+  const up = Array.from({ length: 75 }, (_, i) => ({ t: 1794368700 + i * 300, o: 100 + i, h: 101 + i, l: 99 + i, c: 100.5 + i, v: 10 }));
+  assert.equal(intradayLib.supertrend(up).dir, 1);
+  const down = up.map((b, i) => ({ ...b, o: 200 - i, h: 201 - i, l: 199 - i, c: 199.5 - i }));
+  assert.equal(intradayLib.supertrend(down).dir, -1);
+  const bb = intradayLib.bollinger(Array.from({ length: 20 }, () => 100));
+  assert.equal(bb.mid, 100);
+  assert.equal(bb.pctB, null); // flat: no band width
+  const so = intradayLib.stochastic(up);
+  assert.ok(so.k > 80, `stoch ${so.k}`);
+  const m15 = intradayLib.to15m(up.slice(0, 7), () => 'd');
+  assert.equal(m15.length, 3);
+  assert.equal(m15[0].h, 103);
+  assert.equal(m15[0].c, 102.5);
+  assert.equal(m15[0].v, 30);
+  const x = intradayLib.indicatorsFrom(up);
+  assert.equal(x.stDir, 1);
+  assert.equal(x.trend15, 'UP');
+});

@@ -5,7 +5,7 @@ import { fetchCandles, fetchDepth, marketOpenNow } from '../lib/liveApi.js';
 import ProChart from './ProChart.jsx';
 import { price, dec, mult, int } from '../lib/fmt.js';
 import { weeklyLabel, monthlyLabel, breakoutLabel } from '../lib/signals.js';
-import { pivots, orbStatus, pdStatus, gapLabel, patternTags, pcrSentiment, atmFor } from '../lib/intraday.js';
+import { pivots, orbStatus, pdStatus, gapLabel, patternTags, pcrSentiment, atmFor, stLabel, bbLabel, stochLabel, trend15Label } from '../lib/intraday.js';
 
 const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
 
@@ -197,7 +197,7 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
         <>
           <ProChart bars={candles.bars} levels={dayLevels} cpr={cprBand} />
           <p className="muted small chart-legend">
-            Candles {candles.day} · blue = VWAP, orange / purple = EMA 9 / 15 · pinch or scroll to zoom{candles.vwapProxy ? ' (no volume, average price)' : ''} {isNum(candles.bars.at(-1)[6]) ? price(candles.bars.at(-1)[6]) : ''} · shaded band = CPR · ORB = first 15 min · PDH / PDL = previous day
+            5-min candles {candles.day} · blue = VWAP {isNum(candles.bars.at(-1)[6]) ? price(candles.bars.at(-1)[6]) : ''}{candles.vwapProxy ? ' (no volume, average price)' : ''} · orange / purple = EMA 9 / 15 · dashed = ORB, previous day high / low, SL, T1 · dotted = CPR · pinch or scroll to zoom
           </p>
         </>
       ) : (
@@ -265,6 +265,10 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
         {isNum(s.pcr) && <Stat label={`PCR (${s.oiLive ? 'live' : 'EOD'})`}>{pcrSentiment(s.pcr).label}</Stat>}
         {s.futBuildup && <Stat label={`Futures build-up (${s.oiLive ? 'live' : 'EOD'})`}>{s.futBuildup}</Stat>}
         {isNum(s.iv) && <Stat label={`ATM IV (${s.oiLive ? 'live' : 'EOD'})`}>{dec(s.iv, 1)}%</Stat>}
+        {isNum(s.stDir) && <Stat label="Supertrend (5-min)">{stLabel(s).label}</Stat>}
+        {s.trend15 && <Stat label="15-min trend">{trend15Label(s).label}</Stat>}
+        {isNum(s.bbPctB) && <Stat label="Bollinger (5-min)">{bbLabel(s).label}</Stat>}
+        {isNum(s.stochK) && <Stat label="Stochastic (5-min)">{stochLabel(s).label}</Stat>}
         {isNum(s.orbHigh) && <Stat label="Opening range (15 min)">{orbStatus(s).label}</Stat>}
         {isNum(s.pdh) && <Stat label="Vs previous day">{pdStatus(s).label}</Stat>}
         {isNum(s.dayOpen) && <Stat label="Open">{gapLabel(s).label}</Stat>}

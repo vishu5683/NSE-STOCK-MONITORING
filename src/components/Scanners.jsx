@@ -27,6 +27,10 @@ import {
   patternTags,
   breakScore,
   participantView,
+  stLabel,
+  bbLabel,
+  stochLabel,
+  trend15Label,
 } from '../lib/intraday.js';
 import { exportTable } from '../lib/exporters.js';
 import { DOWNLOADS_ENABLED } from '../lib/features.js';
@@ -678,6 +682,10 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
               { label: 'Intraday 9/15 EMA Signal', x: (r) => ({ BUY: 0, SELL: 1, WAIT: 2, 'NO-TRADE': 3 })[r.intra.signal] ?? 4, cell: (r) => <SignalCell intra={r.intra} /> },
               { label: 'MACD Status', x: (r) => macdStatus(r.macdI, r.macdIsig).label, cell: (r) => <Tag v={macdStatus(r.macdI, r.macdIsig)} />, str: true, hide: 'md' },
               { label: 'CPR', x: (r) => cprLabel(r, c), cell: (r) => cprCell(r, c), str: true, hide: 'md' },
+              { label: 'Supertrend', x: (r) => r.stDir, cell: (r) => <Tag v={stLabel(r)} />, hide: 'sm', card: true },
+              { label: '15m Trend', x: (r) => r.trend15 || '', cell: (r) => <Tag v={trend15Label(r)} />, str: true, hide: 'sm', card: true },
+              { label: 'Bollinger', x: (r) => r.bbPctB, cell: (r) => <Tag v={bbLabel(r)} />, hide: 'md' },
+              { label: 'Stochastic', x: (r) => r.stochK, cell: (r) => <Tag v={stochLabel(r)} />, hide: 'md' },
               MATCH,
             ]}
             key="intraday"

@@ -242,3 +242,32 @@ export function participantView(rec) {
     idxOptBias: has(rec.idxCallLong) && has(rec.idxPutLong) ? rec.idxCallLong - rec.idxPutLong : null,
   };
 }
+
+// ---------- Supertrend / Bollinger / Stochastic / 15-minute trend labels ----------
+export function stLabel(r) {
+  if (!has(r.stDir)) return { label: '-', tone: 'flat' };
+  return r.stDir === 1 ? { label: `BUY (above ${r.stLine})`, tone: 'up' } : { label: `SELL (below ${r.stLine})`, tone: 'down' };
+}
+
+export function bbLabel(r) {
+  if (!has(r.bbPctB)) return { label: '-', tone: 'flat' };
+  if (r.bbPctB > 1) return { label: 'ABOVE UPPER BAND', tone: 'up' };
+  if (r.bbPctB < 0) return { label: 'BELOW LOWER BAND', tone: 'down' };
+  if (r.bbPctB >= 0.8) return { label: `NEAR UPPER (${r.bbPctB})`, tone: 'up' };
+  if (r.bbPctB <= 0.2) return { label: `NEAR LOWER (${r.bbPctB})`, tone: 'down' };
+  return { label: `INSIDE (${r.bbPctB})`, tone: 'flat' };
+}
+
+export function stochLabel(r) {
+  if (!has(r.stochK)) return { label: '-', tone: 'flat' };
+  const t = `${Math.round(r.stochK)}/${Math.round(r.stochD)}`;
+  if (r.stochK >= 80) return { label: `OVERBOUGHT ${t}`, tone: 'warn' };
+  if (r.stochK <= 20) return { label: `OVERSOLD ${t}`, tone: 'warn' };
+  return { label: r.stochK > r.stochD ? `RISING ${t}` : `FALLING ${t}`, tone: r.stochK > r.stochD ? 'up' : 'down' };
+}
+
+export function trend15Label(r) {
+  if (!r.trend15) return { label: '-', tone: 'flat' };
+  const rs = has(r.rsi15) ? ` · RSI ${Math.round(r.rsi15)}` : '';
+  return { label: `${r.trend15}${rs}`, tone: r.trend15 === 'UP' ? 'up' : r.trend15 === 'DOWN' ? 'down' : 'flat' };
+}

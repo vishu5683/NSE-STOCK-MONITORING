@@ -52,6 +52,82 @@ export function rsiLast(values, n = 14) {
 }
 
 const r2 = (v) => Math.round(v * 100) / 100;
+
+// Supertrend (ATR period n, multiplier m) on bars {h, l, c}: returns { dir: 1 | -1, line }
+export function supertrend(bars, n = 10, m = 3) {
+  if (bars.length <= n + 1) return null;
+  let atr = null;
+  let upper = null;
+  let lower = null;
+  let dir = 1;
+  for (let i = 1; i < bars.length; i += 1) {
+    const { h, l, c } = bars[i];
+    const pc = bars[i - 1].c;
+    const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+    atr = atr === null ? tr : (atr * (n - 1) + tr) / n; // Wilder
+    const mid = (h + l) / 2;
+    const bu = mid + m * atr;
+    const bl = mid - m * atr;
+    upper = upper === null || bu < upper || pc > upper ? bu : upper;
+    lower = lower === null || bl > lower || pc < lower ? bl : lower;
+    if (dir === 1 && c < lower) dir = -1;
+    else if (dir === -1 && c > upper) dir = 1;
+  }
+  return { dir, line: dir === 1 ? lower : upper };
+}
+
+// Bollinger Bands (n, k) on closes: { up, mid, low, pctB }
+export function bollinger(closes, n = 20, k = 2) {
+  if (closes.length < n) return null;
+  const w = closes.slice(-n);
+  const mid = w.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(w.reduce((a, b) => a + (b - mid) ** 2, 0) / n);
+  const up = mid + k * sd;
+  const low = mid - k * sd;
+  const last = closes[closes.length - 1];
+  return { up, mid, low, pctB: up > low ? (last - low) / (up - low) : null };
+}
+
+// Slow stochastic (14, 3, 3) on bars {h, l, c}: { k, d }
+export function stochastic(bars, n = 14, s1 = 3, s2 = 3) {
+  if (bars.length < n + s1 + s2) return null;
+  const raw = [];
+  for (let i = n - 1; i < bars.length; i += 1) {
+    const w = bars.slice(i - n + 1, i + 1);
+    const hh = Math.max(...w.map((b) => b.h));
+    const ll = Math.min(...w.map((b) => b.l));
+    raw.push(hh > ll ? ((bars[i].c - ll) / (hh - ll)) * 100 : 50);
+  }
+  const sma = (arr, p) => arr.map((_, i) => (i + 1 < p ? null : arr.slice(i + 1 - p, i + 1).reduce((a, b) => a + b, 0) / p)).filter((v) => v !== null);
+  const k = sma(raw, s1);
+  const d = sma(k, s2);
+  return { k: k[k.length - 1], d: d[d.length - 1] };
+}
+
+// 15-minute candles from 5-minute ones (groups of three inside each session)
+export function to15m(bars, dayOf) {
+  const out = [];
+  let cur = null;
+  let day = null;
+  let n = 0;
+  for (const b of bars) {
+    const d = dayOf(b.t);
+    if (d !== day || n === 3) {
+      if (cur) out.push(cur);
+      cur = { t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v };
+      day = d;
+      n = 1;
+    } else {
+      cur.h = Math.max(cur.h, b.h);
+      cur.l = Math.min(cur.l, b.l);
+      cur.c = b.c;
+      cur.v += b.v;
+      n += 1;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const istDay = (sec) => new Date(sec * 1000 + IST_MS).toISOString().slice(0, 10);
 
@@ -77,6 +153,24 @@ export function indicatorsFrom(bars, { index = false } = {}) {
     iLtp: r2(closes[last]),
     iAt: clean[last].t ? new Date(clean[last].t * 1000).toISOString() : null,
   };
+
+  // Supertrend, Bollinger, Stochastic on 5-minute bars; trend and RSI on 15-minute bars
+  const st = supertrend(clean);
+  if (st) Object.assign(out, { stDir: st.dir, stLine: r2(st.line) });
+  const bb = bollinger(closes);
+  if (bb) Object.assign(out, { bbUp: r2(bb.up), bbMid: r2(bb.mid), bbLow: r2(bb.low), bbPctB: bb.pctB === null ? null : Math.round(bb.pctB * 100) / 100 });
+  const so = stochastic(clean);
+  if (so) Object.assign(out, { stochK: Math.round(so.k * 10) / 10, stochD: Math.round(so.d * 10) / 10 });
+  const m15 = to15m(clean, istDay);
+  if (m15.length >= 21) {
+    const c15 = m15.map((b) => b.c);
+    const a9 = emaSeries(c15, 9).at(-1);
+    const a21 = emaSeries(c15, 21).at(-1);
+    const lc = c15.at(-1);
+    out.trend15 = lc > a9 && a9 > a21 ? 'UP' : lc < a9 && a9 < a21 ? 'DOWN' : 'SIDEWAYS';
+    const r15 = rsiLast(c15);
+    out.rsi15 = r15 === null ? null : Math.round(r15 * 10) / 10;
+  }
 
   // today = the session of the last bar (IST); previous = the session before it
   const today = istDay(clean[last].t);
