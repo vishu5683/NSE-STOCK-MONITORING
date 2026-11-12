@@ -354,7 +354,7 @@ const fakeChain = (spot, strikes) =>
   strikes.map((k) => ({
     strike_price: k,
     underlying_spot_price: spot,
-    call_options: { market_data: { oi: k > spot ? 5000 + k : 1000, prev_oi: k > spot ? 4000 + k : 1000, ltp: Math.max(1, spot - k + 20), volume: 10 }, option_greeks: { iv: 20 } },
+    call_options: { market_data: { oi: k > spot ? 5000 + k : 1000, prev_oi: k > spot ? 4000 + k : 1000, ltp: Math.max(1, spot - k + 20), volume: 10 }, option_greeks: { iv: 20, delta: 0.5, theta: -2.1, gamma: 0.002, vega: 1.3 } },
     put_options: { market_data: { oi: k < spot ? 6000 + k : 1000, prev_oi: k < spot ? 5000 : 1000, ltp: Math.max(1, k - spot + 20), volume: 10 }, option_greeks: { iv: 22 } },
   }));
 
@@ -414,11 +414,37 @@ test('/api/oi: option chains + futures quotes, login and token errors', async ()
   });
   assert.equal(ch.status, 200);
   assert.equal(ch.json.atm, 100);
-  assert.equal(ch.json.rows[0].length, 9);
+  assert.equal(ch.json.rows[0].length, 17);
+  assert.equal(ch.json.rows[0][10], 0.5); // CE delta
+  assert.equal(ch.json.rows[0][11], -2.1); // CE theta
   // a refused token is reported, not hidden
   oiLib.resetOiCache();
   global.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
   const refused = await call(oiApi, { headers: h });
   assert.equal(refused.status, 502);
   assert.equal(refused.json.error, 'UPSTOX_TOKEN_INVALID');
+});
+
+const { default: depthApi } = await import('../api/depth.js');
+
+test('/api/depth: 5 levels, totals and circuit limits; bad symbol refused', async () => {
+  oiLib.resetOiCache();
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ status: 'success', data: { 'NSE_EQ:RELIANCE': { last_price: 100, total_buy_quantity: 600, total_sell_quantity: 400, average_price: 99.5, upper_circuit_limit: 110, lower_circuit_limit: 90, depth: { buy: Array.from({ length: 5 }, (_, i) => ({ price: 100 - i * 0.05, quantity: 10 + i, orders: 1 })), sell: Array.from({ length: 5 }, (_, i) => ({ price: 100.05 + i * 0.05, quantity: 20, orders: 2 })) } } } }),
+  });
+  const { token } = auth.issueToken();
+  const run = (url) => new Promise((resolve) => {
+    const res = { statusCode: 200, setHeader() {}, end(t) { resolve({ status: this.statusCode, json: JSON.parse(t) }); } };
+    depthApi({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } }, res);
+  });
+  const ok = await run('/api/depth?s=RELIANCE');
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.buy.length, 5);
+  assert.deepEqual(ok.json.buy[0], [100, 10, 1]);
+  assert.equal(ok.json.totalBuy, 600);
+  assert.equal(ok.json.upperCircuit, 110);
+  assert.equal((await run('/api/depth?s=..%2Fx')).status, 400);
+  assert.equal((await run('/api/depth?s=NOTASTOCK')).status, 404);
 });

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Change, SideBadge, ScoreBar } from './ui.jsx';
 import { PriceChart, RangeBar, CandleChart } from './Charts.jsx';
-import { fetchCandles, marketOpenNow } from '../lib/liveApi.js';
+import { fetchCandles, fetchDepth, marketOpenNow } from '../lib/liveApi.js';
 import { price, dec, mult, int } from '../lib/fmt.js';
 import { weeklyLabel, monthlyLabel, breakoutLabel } from '../lib/signals.js';
 import { pivots, orbStatus, pdStatus, gapLabel, patternTags, pcrSentiment, atmFor } from '../lib/intraday.js';
@@ -62,7 +62,74 @@ function useCandles(symbol) {
   return data;
 }
 
+// 5-level order book, refreshed every 5 s while the popup is open in market hours
+function useDepth(symbol) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    let off = false;
+    let timer = null;
+    const load = async () => {
+      const x = await fetchDepth(symbol);
+      if (off) return;
+      if (x) setD(x);
+      if (marketOpenNow()) timer = setTimeout(load, 5000);
+    };
+    load();
+    return () => {
+      off = true;
+      clearTimeout(timer);
+    };
+  }, [symbol]);
+  return d;
+}
+
+function OrderBook({ d }) {
+  if (!d || (!d.buy.length && !d.sell.length)) return null;
+  const max = Math.max(1, ...d.buy.map((x) => x[1]), ...d.sell.map((x) => x[1]));
+  const tb = d.totalBuy || 0;
+  const ts = d.totalSell || 0;
+  const buyPct = tb + ts ? Math.round((tb / (tb + ts)) * 100) : null;
+  return (
+    <div className="plan orderbook">
+      <h3>Order book (live)</h3>
+      <div className="ob-grid">
+        <div>
+          <div className="ob-head"><span>Bid qty</span><span>Bid</span></div>
+          {d.buy.map(([p, q], i) => (
+            <div className="ob-row buy" key={`b${i}`}>
+              <i style={{ width: `${(q / max) * 100}%` }} />
+              <span>{int(q)}</span>
+              <strong>{price(p)}</strong>
+            </div>
+          ))}
+        </div>
+        <div>
+          <div className="ob-head"><span>Ask</span><span>Ask qty</span></div>
+          {d.sell.map(([p, q], i) => (
+            <div className="ob-row sell" key={`s${i}`}>
+              <i style={{ width: `${(q / max) * 100}%` }} />
+              <strong>{price(p)}</strong>
+              <span>{int(q)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="grid-stats">
+        {buyPct !== null && (
+          <div className="stat">
+            <span>Total buy vs sell qty</span>
+            <strong className={buyPct >= 50 ? 'up-t' : 'down-t'}>{buyPct}% buyers</strong>
+          </div>
+        )}
+        {isNum(d.avgPrice) && <div className="stat"><span>Average traded price</span><strong>₹{price(d.avgPrice)}</strong></div>}
+        {isNum(d.upperCircuit) && <div className="stat"><span>Circuit (low / high)</span><strong>{price(d.lowerCircuit)} / {price(d.upperCircuit)}</strong></div>}
+      </div>
+    </div>
+  );
+}
+
 export default function StockModal({ stock: s, onClose, watched, onToggleWatch }) {
+  const depth = useDepth(s.s);
   const plan = s.plan;
   const candles = useCandles(s.s);
   const [view, setView] = useState('today');
@@ -145,6 +212,8 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
       ) : (
         <p className="muted small">No setup matches the current screener settings for this stock.</p>
       )}
+
+      <OrderBook d={depth} />
 
       <Levels s={s} />
 

@@ -576,3 +576,16 @@ button.index-card:hover { border-color: var(--accent); }
   .ix-chips { gap: 3px; }
   .ix-chip { font-size: 9.5px; padding: 1px 6px; }
 }
+
+/* order book + greeks */
+.ob-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ob-head { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding: 0 6px 4px; }
+.ob-row { position: relative; display: flex; justify-content: space-between; gap: 8px; padding: 4px 6px; font-size: 12.5px; font-variant-numeric: tabular-nums; border-radius: 4px; overflow: hidden; }
+.ob-row i { position: absolute; top: 0; bottom: 0; opacity: 0.18; }
+.ob-row.buy i { right: 0; background: var(--up); }
+.ob-row.sell i { left: 0; background: var(--down); }
+.ob-row > span, .ob-row > strong { position: relative; }
+.ob-row.buy strong { color: var(--up); }
+.ob-row.sell strong { color: var(--down); }
+.orderbook .grid-stats { margin-top: 10px; }
+.grid-stats.greeks { margin-top: 4px; }

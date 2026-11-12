@@ -84,12 +84,15 @@ export function chainRows(data) {
       const m = o?.market_data || {};
       const oi = Number(m.oi) || 0;
       const prev = Number(m.prev_oi);
-      return { oi, doi: isNum(prev) ? oi - prev : null, ltp: isNum(Number(m.ltp)) ? Number(m.ltp) : null, vol: Number(m.volume) || 0, iv: Number(o?.option_greeks?.iv) };
+      const g = o?.option_greeks || {};
+      const n = (v) => (isNum(Number(v)) ? Math.round(Number(v) * 10000) / 10000 : null);
+      return { oi, doi: isNum(prev) ? oi - prev : null, ltp: isNum(Number(m.ltp)) ? Number(m.ltp) : null, vol: Number(m.volume) || 0, iv: Number(g.iv), delta: n(g.delta), theta: n(g.theta), gamma: n(g.gamma), vega: n(g.vega), ivr: n(g.iv) };
     };
     const ce = side(r.call_options);
     const pe = side(r.put_options);
     ivs.set(k, [ce.iv, pe.iv]);
-    rows.push([k, ce.oi, ce.doi, ce.ltp, ce.vol, pe.ltp, pe.doi, pe.oi, pe.vol]);
+    // 0-8 as chain.json; 9-16 live greeks: ceIv, ceDelta, ceTheta, ceGamma, ceVega, peIv, peDelta, peTheta
+    rows.push([k, ce.oi, ce.doi, ce.ltp, ce.vol, pe.ltp, pe.doi, pe.oi, pe.vol, ce.ivr, ce.delta, ce.theta, ce.gamma, ce.vega, pe.ivr, pe.delta, pe.theta]);
   }
   rows.sort((a, b) => a[0] - b[0]);
   return { rows, spot, ivs };
@@ -239,6 +242,36 @@ export async function getOi(token, now = Date.now()) {
     if (cache && now - cache.at < STALE_OK_MS && err.code !== 'UPSTOX_TOKEN_INVALID') return { ...cache.payload, stale: true, warning: err.message };
     throw err;
   }
+}
+
+// Market depth for one stock: 5 bid / ask levels, total buy / sell quantity, circuit limits (full quote)
+const depthCache = new Map();
+export async function getDepth(symbol, token, now = Date.now()) {
+  if (!token) throw new OiError('NOT_CONFIGURED', 'UPSTOX_ANALYTICS_TOKEN is not set on the server.');
+  const key = instruments.stocks?.[symbol];
+  if (!key) throw new OiError('NO_DATA', 'Unknown symbol.');
+  const hit = depthCache.get(symbol);
+  if (hit && now - hit.at < 5000) return hit.payload;
+  const data = await get(`/market-quote/quotes?instrument_key=${encodeURIComponent(key)}`, token);
+  const q = Object.values(data || {})[0];
+  if (!q) throw new OiError('NO_DATA', 'No quote for this symbol.');
+  const lv = (arr) => (Array.isArray(arr) ? arr.slice(0, 5).map((x) => [Number(x.price) || 0, Number(x.quantity) || 0, Number(x.orders) || 0]) : []);
+  const payload = {
+    symbol,
+    asOf: new Date().toISOString(),
+    ltp: Number(q.last_price) || null,
+    buy: lv(q.depth?.buy),
+    sell: lv(q.depth?.sell),
+    totalBuy: Number(q.total_buy_quantity) || null,
+    totalSell: Number(q.total_sell_quantity) || null,
+    avgPrice: Number(q.average_price) || null,
+    upperCircuit: Number(q.upper_circuit_limit) || null,
+    lowerCircuit: Number(q.lower_circuit_limit) || null,
+    volume: Number(q.volume) || null,
+  };
+  if (depthCache.size > 300) depthCache.delete(depthCache.keys().next().value);
+  depthCache.set(symbol, { at: Date.now(), payload });
+  return payload;
 }
 
 // one underlying, strike-wise, for the chain popup

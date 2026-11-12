@@ -1121,6 +1121,8 @@ function ChainModal({ symbol, rows, indices, onClose }) {
   const ch = liveChain.data || (liveChain.loading ? null : eodChain.data?.chains?.[symbol]);
   const chain = isLive ? { data: { date: 'live' } } : eodChain;
   const maxOi = ch ? Math.max(1, ...ch.rows.flatMap((r) => [r[1], r[7]])) : 1;
+  const greeks = Boolean(ch && ch.rows.some((r) => r.length > 9 && (r[10] !== null || r[15] !== null)));
+  const atmRow = ch && greeks ? ch.rows.reduce((b, r) => (Math.abs(r[0] - (row?.ltp ?? ch.spot)) < Math.abs(b[0] - (row?.ltp ?? ch.spot)) ? r : b), ch.rows[0]) : null;
   const spot = row?.ltp;
   return (
     <Modal onClose={onClose} label={`${symbol} option chain`}>
@@ -1152,11 +1154,17 @@ function ChainModal({ symbol, rows, indices, onClose }) {
           <table className="table chain">
             <thead>
               <tr>
-                <th>CE OI</th><th className="hide-sm">CE chg OI</th><th>CE LTP</th><th className="strike-col">Strike</th><th>PE LTP</th><th className="hide-sm">PE chg OI</th><th>PE OI</th>
+                <th>CE OI</th><th className="hide-sm">CE chg OI</th>
+                {greeks && <th className="hide-md">CE IV</th>}
+                {greeks && <th className="hide-sm">CE Δ</th>}
+                <th>CE LTP</th><th className="strike-col">Strike</th><th>PE LTP</th>
+                {greeks && <th className="hide-sm">PE Δ</th>}
+                {greeks && <th className="hide-md">PE IV</th>}
+                <th className="hide-sm">PE chg OI</th><th>PE OI</th>
               </tr>
             </thead>
             <tbody>
-              {ch.rows.map(([k, ceOi, ceDoi, ceLtp, , peLtp, peDoi, peOi]) => {
+              {ch.rows.map(([k, ceOi, ceDoi, ceLtp, , peLtp, peDoi, peOi, , ceIv, ceDelta, , , , peIv, peDelta]) => {
                 const atm = has(spot) ? Math.abs(k - spot) === Math.min(...ch.rows.map((r) => Math.abs(r[0] - spot))) : k === ch.atm;
                 const itmCe = has(spot) && k < spot;
                 return (
@@ -1166,12 +1174,16 @@ function ChainModal({ symbol, rows, indices, onClose }) {
                       <span>{compact(ceOi)}</span>
                     </td>
                     <td className={`num hide-sm ${ceDoi > 0 ? 'down-t' : ceDoi < 0 ? 'up-t' : ''}`}>{compact(ceDoi)}</td>
+                    {greeks && <td className="num hide-md muted">{dec(ceIv, 1)}</td>}
+                    {greeks && <td className="num hide-sm">{dec(ceDelta, 2)}</td>}
                     <td className={`num ${itmCe ? 'itm' : ''}`}>{price(ceLtp)}</td>
                     <td className="num strike-col">
                       <strong>{num0(k)}</strong>
                       {k === row?.maxPain && <small className="warn-t"> MP</small>}
                     </td>
                     <td className={`num ${!itmCe ? 'itm' : ''}`}>{price(peLtp)}</td>
+                    {greeks && <td className="num hide-sm">{dec(peDelta, 2)}</td>}
+                    {greeks && <td className="num hide-md muted">{dec(peIv, 1)}</td>}
                     <td className={`num hide-sm ${peDoi > 0 ? 'up-t' : peDoi < 0 ? 'down-t' : ''}`}>{compact(peDoi)}</td>
                     <td className={`num oi-cell ${!itmCe ? 'itm' : ''}`}>
                       <i className="oi-bar pe" style={{ width: `${(peOi / maxOi) * 100}%` }} />
@@ -1184,7 +1196,15 @@ function ChainModal({ symbol, rows, indices, onClose }) {
           </table>
         </div>
       )}
-      <p className="small muted">Call writing (CE OI rising) caps the price; put writing (PE OI rising) supports it. MP = max pain. Shaded = in the money at the live price.</p>
+      {atmRow && (
+        <div className="grid-stats greeks">
+          <div className="stat"><span>ATM {num0(atmRow[0])} CE: Δ / Θ</span><strong>{dec(atmRow[10], 2)} / {dec(atmRow[11], 2)}</strong></div>
+          <div className="stat"><span>ATM CE: Γ / Vega</span><strong>{dec(atmRow[12], 4)} / {dec(atmRow[13], 2)}</strong></div>
+          <div className="stat"><span>ATM PE: Δ / Θ</span><strong>{dec(atmRow[15], 2)} / {dec(atmRow[16], 2)}</strong></div>
+          <div className="stat"><span>ATM IV CE / PE</span><strong>{dec(atmRow[9], 1)}% / {dec(atmRow[14], 1)}%</strong></div>
+        </div>
+      )}
+      <p className="small muted">Call writing (CE OI rising) caps the price; put writing (PE OI rising) supports it. MP = max pain. Shaded = in the money at the live price.{greeks ? ' Δ = delta (price move of the option per ₹1 of the stock), Θ = theta (value lost per day).' : ''}</p>
       {has(spot) && row && <p className="small muted">ATM now: {num0(atmStrike(spot, row.s ? null : row.name, row.step))}</p>}
     </Modal>
   );

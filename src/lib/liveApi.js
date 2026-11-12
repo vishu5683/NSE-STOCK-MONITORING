@@ -149,6 +149,17 @@ export async function fetchChainLive(symbol) {
   }
 }
 
+// Live 5-level market depth for one stock (popup). null when unavailable.
+export async function fetchDepth(symbol) {
+  const token = read();
+  try {
+    const { res, body } = await jsonFetch(`./api/depth?s=${encodeURIComponent(symbol)}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 8000);
+    return res.ok && Array.isArray(body?.buy) ? body : null;
+  } catch {
+    return null;
+  }
+}
+
 // NSE cash session in IST, Mon-Fri 09:15-15:30. Poll fast while it is open, slowly otherwise.
 export function marketOpenNow(now = new Date()) {
   const ist = new Date(now.getTime() + 5.5 * 3600 * 1000);
