@@ -236,3 +236,13 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 - build-instruments.mjs writes 'fo' (underlying key, futures [expiry,key], option expiries); the workflow runs it daily and commits api/_instruments.json.
 - vercel.json maxDuration 30 s. Checked live 11-Nov 17:24 IST: 205 option chains + 205 futures, 0 failed; RELIANCE PCR 0.78 vs NSE EOD 0.80; NIFTY ATM IV 17.8 vs India VIX 17.6.
 - Not done: index ITM / ATM / OTM premium table still reads the end-of-day chain.json.
+
+### 17. Phase 2.5 (12-Nov-2026)
+- Tick-by-tick prices: src/lib/liveFeed.js connects the browser straight to the Upstox V3 market feed (ltpc mode, 263 keys in batches of 100). /api/feed-url returns the one-time wss URL (token stays on the server) plus the key -> symbol map. Ticks are flushed to state once a second; while ticks arrive (last tick < 15 s) the 5 s /api/quotes polling is skipped; 5 reconnects with backoff, then polling only. Market hours only. Switch: WS_ENABLED in src/lib/features.js. server/decodeFeed.js now runs on Uint8Array + TextDecoder (browser and Node). Live check 11:11 IST: 138 frames and 27 of 30 prices changed in 6 s.
+- Greeks: chain rows carry indices 9-16 (ceIv, ceDelta, ceTheta, ceGamma, ceVega, peIv, peDelta, peTheta) from Upstox option_greeks; chain popup shows CE/PE delta and IV columns and ATM greeks tiles. 0-8 unchanged, so chain.json readers still work.
+- /api/depth?s=: 5-level bid / ask, total buy / sell qty, average price, circuits (full quote); stock popup 'Order book (live)', refreshed every 5 s.
+- Pro chart: src/components/ProChart.jsx with lightweight-charts 4.2.3 (lazy chunk ~52 KB gz). Built once; candles and price lines update in place (levels change on every tick because the plan uses the live price; rebuilding reset the zoom). SVG CandleChart is the fallback.
+- Live intraday layer adds Supertrend (10,3, Wilder ATR), Bollinger (20,2, %B), slow Stochastic (14,3,3), 15-minute trend (EMA 9 / 21 on 15-min bars built from 5-min) and RSI 15m. Intraday sheet + popup show them.
+- /api/candles reads Upstox v3 intraday 5-min candles first, Yahoo as fallback (payload.source).
+- /api/oi in market hours: 207 chains took longer than the 30 s function limit at 4 parallel; now 12 parallel paced at 25/s with a 22 s budget (8.9 s measured, 0 failed). First OI after page load takes ~10 s; labels show EOD until then.
+- Not done: OI / PCR trend over the day and browser push alerts need storage (Upstash Redis free tier); Telegram skipped by the user.
