@@ -20,6 +20,7 @@ const write = (v) => {
 };
 
 export const hasToken = () => Boolean(read());
+export const authHeader = () => (read() ? { Authorization: `Bearer ${read()}` } : {});
 export const clearToken = () => write('');
 
 async function jsonFetch(url, opts = {}, timeoutMs = 8000) {

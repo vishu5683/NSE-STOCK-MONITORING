@@ -1,15 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadSettings, saveSettings } from './lib/settings.js';
 import { analyseAll, marketBreadth, sectorStats } from './lib/signals.js';
 import { ageText, hoursSince } from './lib/fmt.js';
 import { applyBook, applyIntraday, applyOi } from './lib/live.js';
-import { fetchLive, fetchIntraday, fetchOi, probe, pollMs, hasToken, clearToken, marketOpenNow, marketPhaseNow } from './lib/liveApi.js';
+import { authHeader, fetchLive, fetchIntraday, fetchOi, probe, pollMs, hasToken, clearToken, marketOpenNow, marketPhaseNow } from './lib/liveApi.js';
 import { logout, LOGIN_ENABLED } from './lib/auth.js';
 import Dashboard from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
 import Scanners from './components/Scanners.jsx';
 import Reports from './components/Reports.jsx';
-import { DOWNLOADS_ENABLED } from './lib/features.js';
+import { DOWNLOADS_ENABLED, WS_ENABLED } from './lib/features.js';
+import { startFeed } from './lib/liveFeed.js';
 import Admin from './components/Admin.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
 import { isAdmin } from './lib/auth.js';
@@ -46,6 +47,7 @@ export default function App() {
   const [live, setLive] = useState(null);
   const [intra, setIntra] = useState(null);
   const [oi, setOi] = useState(null);
+  const wsTickAt = useRef(0);
   const [sectorFilter, setSectorFilter] = useState('');
   const [theme, setTheme] = useState(() => {
     try {
@@ -113,6 +115,11 @@ export default function App() {
     let misses = 0;
     const tick = async () => {
       if (stopped) return;
+      // while the WebSocket delivers ticks, polling is not needed
+      if (Date.now() - wsTickAt.current < 15000) {
+        timer = setTimeout(tick, pollMs());
+        return;
+      }
       if (document.visibilityState === 'visible') {
         const r = await fetchLive();
         if (stopped) return;
@@ -177,6 +184,50 @@ export default function App() {
     return () => {
       stopped = true;
       clearTimeout(timer);
+    };
+  }, [authed]);
+
+  // Tick-by-tick prices over the Upstox WebSocket while the market is open (polling is the fallback).
+  useEffect(() => {
+    if (!WS_ENABLED || import.meta.env.DEV || !authed || (LOGIN_ENABLED && !hasToken())) return undefined;
+    let stop = null;
+    let gaveUp = false;
+    const sync = () => {
+      const want = marketOpenNow() && !gaveUp;
+      if (want && !stop) {
+        stop = startFeed({
+          authHeader: authHeader(),
+          onStatus: (st) => {
+            if (st.gaveUp) gaveUp = true;
+          },
+          onTicks: (batch) => {
+            wsTickAt.current = Date.now();
+            setLive((cur) => ({
+              ...(cur || {}),
+              authed: true,
+              connected: true,
+              source: 'upstox-ws',
+              updatedAt: new Date().toISOString(),
+              mapped: cur?.mapped || Object.keys(batch.quotes).length,
+              quotes: { ...(cur?.quotes || {}), ...batch.quotes },
+              indices: { ...(cur?.indices || {}), ...batch.indices },
+              stale: false,
+              partial: false,
+            }));
+          },
+        });
+      } else if (!want && stop) {
+        stop();
+        stop = null;
+      }
+    };
+    probe().then((p) => {
+      if (p.available && p.live) sync();
+    });
+    const id = setInterval(sync, 60000);
+    return () => {
+      clearInterval(id);
+      if (stop) stop();
     };
   }, [authed]);
 
@@ -330,7 +381,7 @@ export default function App() {
           <div className="status" title={liveOn ? (live.source === 'yahoo' ? 'Yahoo Finance prices' : 'Upstox live price') : meta.source}>
             <span className={`dot ${liveOn ? 'ok' : stale ? 'warn' : 'ok'}`} />
             <span>
-              {liveOn ? `${live.source === 'yahoo' ? 'Live (Yahoo)' : 'Upstox live'} · ${ageText(live.updatedAt) || 'now'}` : `${meta.lastTradingDate} · ${ageText(meta.generatedAt)}`}
+              {liveOn ? `${live.source === 'yahoo' ? 'Live (Yahoo)' : live.source === 'upstox-ws' ? 'Live ticks' : 'Upstox live'} · ${ageText(live.updatedAt) || 'now'}` : `${meta.lastTradingDate} · ${ageText(meta.generatedAt)}`}
             </span>
           </div>
           <button className="btn ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">
@@ -342,7 +393,7 @@ export default function App() {
       <main className="content">
         <div className="data-strip">
           <span className={`dot ${liveOn ? 'ok' : stale ? 'warn' : 'ok'}`} />{' '}
-          {liveOn ? `${live.source === 'yahoo' ? 'Live (Yahoo)' : 'Upstox live'} · ${ageText(live.updatedAt) || 'now'}` : `Data ${meta.lastTradingDate} · updated ${ageText(meta.generatedAt)}`} · {marketPhaseNow(new Date(), liveOn ? newestTick(live) : null).label}
+          {liveOn ? `${live.source === 'yahoo' ? 'Live (Yahoo)' : live.source === 'upstox-ws' ? 'Live ticks' : 'Upstox live'} · ${ageText(live.updatedAt) || 'now'}` : `Data ${meta.lastTradingDate} · updated ${ageText(meta.generatedAt)}`} · {marketPhaseNow(new Date(), liveOn ? newestTick(live) : null).label}
         </div>
         {import.meta.env.DEV && live && !live.authed && (
           <div className="banner warn">
@@ -356,7 +407,7 @@ export default function App() {
         {liveOn && (
           <details className={`banner live-note ${live.stale || live.partial ? 'warn' : 'info'}`}>
             <summary>
-              {live.source === 'yahoo' ? 'Live prices (Yahoo)' : 'Upstox live prices'} · {live.mapped} stocks
+              {live.source === 'yahoo' ? 'Live prices (Yahoo)' : live.source === 'upstox-ws' ? 'Upstox tick-by-tick prices' : 'Upstox live prices'} · {live.mapped} stocks
               {intra?.count ? ` · intraday indicators every 2 min` : ''}
               {oiLive ? ` · OI live (Upstox, every 5 min)` : meta.foDate ? ` · OI: NSE close ${meta.foDate}` : ''}
               {live.stale ? ' · showing last good prices' : ''}

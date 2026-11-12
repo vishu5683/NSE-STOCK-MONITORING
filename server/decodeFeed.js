@@ -1,6 +1,8 @@
 // Tiny reader for the Upstox V3 feed frames we care about: last price and previous close.
 // Schema: server/MarketDataFeedV3.proto. Unknown fields are skipped.
 
+const utf8 = new TextDecoder();
+
 function readVarint(buf, o) {
   let result = 0;
   let shift = 0;
@@ -64,7 +66,8 @@ function parseMessage(buf, o, limit, onField) {
 }
 
 export function decodeFeed(buffer) {
-  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  // Uint8Array in the browser, Buffer (a Uint8Array) in Node
+  const buf = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const o = { i: 0 };
   const feeds = {};
   let currentTs = 0;
@@ -77,7 +80,7 @@ export function decodeFeed(buffer) {
       parseMessage(buf, o, entryEnd, (f, w) => {
         if (f === 1 && w === 2) {
           const len = readVarint(buf, o);
-          key = buf.subarray(o.i, o.i + len).toString('utf8');
+          key = utf8.decode(buf.subarray(o.i, o.i + len));
           o.i += len;
           return true;
         }

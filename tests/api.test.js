@@ -477,3 +477,22 @@ test('candles: Upstox intraday rows parsed oldest first', async () => {
   assert.equal(b[0].t, Date.parse('2026-11-12T03:45:00Z') / 1000);
   assert.equal(barsFromUpstox({ data: { candles: [] } }), null);
 });
+
+const { default: feedUrlApi } = await import('../api/feed-url.js');
+
+test('/api/feed-url: one-time WebSocket URL + key map, token stays on the server', async () => {
+  const seen = [];
+  global.fetch = async (url, opts) => {
+    seen.push({ url: String(url), auth: opts?.headers?.Authorization });
+    return { ok: true, status: 200, json: async () => ({ status: 'success', data: { authorized_redirect_uri: 'wss://feed.example/abc' } }) };
+  };
+  const { token } = auth.issueToken();
+  const ok = await call(feedUrlApi, { headers: { authorization: `Bearer ${token}` } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.url, 'wss://feed.example/abc');
+  assert.ok(Object.keys(ok.json.keys).length > 250);
+  assert.deepEqual(Object.values(ok.json.keys).find((v) => v[1] === 'NIFTY 50'), ['i', 'NIFTY 50']);
+  assert.match(seen[0].url, /feed\/market-data-feed\/authorize$/);
+  assert.ok(!JSON.stringify(ok.json).includes(process.env.UPSTOX_ANALYTICS_TOKEN), 'token never sent to the browser');
+  assert.equal((await call(feedUrlApi)).status, 401);
+});
