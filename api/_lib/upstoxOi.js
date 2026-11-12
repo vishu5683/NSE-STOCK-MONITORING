@@ -2,14 +2,15 @@
 //   * option chain per underlying (v2/option/chain): PCR, call / put OI walls, heaviest writing (OI change),
 //     max pain, ATM strike and IV - the same summary data-pipeline/derivatives.py builds from the NSE bhavcopy
 //   * near-month futures (v2/market-quote/quotes, full mode): price, OI, volume, previous close
-// One option-chain call per underlying (~206), paced to about 20 a second, cached for 5 minutes and shared by all visitors.
+// One option-chain call per underlying (~206), 12 at a time paced to about 25 a second (~9 s), cached for 5 minutes and shared by all visitors.
 // Expiries and futures keys come from api/_instruments.json ("fo"), which the daily workflow rebuilds.
 
 import instruments from '../_instruments.json' with { type: 'json' };
 
 const BASE = 'https://api.upstox.com/v2';
-const CONCURRENCY = 4;
-const MIN_GAP_MS = 50; // Upstox allows about 50 requests a second; stay near 20 a second
+const CONCURRENCY = 12;
+const BUDGET_MS = 22000; // stop starting new calls here so the function (30 s limit) never times out
+const MIN_GAP_MS = 40; // Upstox allows about 50 requests a second; stay near 25 a second
 let nextSlot = 0;
 async function paced() {
   const now = Date.now();
@@ -194,8 +195,15 @@ async function refresh(token, now) {
   let failed = 0;
   let firstError = null;
   let next = 0;
+  let skipped = 0;
+  const started = Date.now();
   async function worker() {
     while (next < names.length) {
+      if (Date.now() - started > BUDGET_MS) {
+        skipped = names.length - next;
+        next = names.length;
+        break;
+      }
       const n = names[next++];
       try {
         const c = await optionChain(n, today, token);
@@ -220,7 +228,7 @@ async function refresh(token, now) {
   }
   const count = Object.values(stocks).filter((x) => isNum(x.pcr)).length; // stocks with a live option chain
   if (!count && !Object.keys(stocks).length) throw firstError || new OiError('UPSTOX_ERROR', 'No option data returned.');
-  return { asOf: new Date().toISOString(), day: today, source: 'upstox', stocks, indices, count, futures: Object.values(stocks).filter((x) => isNum(x.futLive)).length, failed, partial: failed > 0, warning: failed ? firstError?.message : undefined };
+  return { asOf: new Date().toISOString(), day: today, source: 'upstox', stocks, indices, count, futures: Object.values(stocks).filter((x) => isNum(x.futLive)).length, failed, skipped, ms: Date.now() - started, partial: failed > 0 || skipped > 0, warning: failed ? firstError?.message : undefined };
 }
 
 export async function getOi(token, now = Date.now()) {
