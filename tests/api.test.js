@@ -468,3 +468,12 @@ test('supertrend, bollinger, stochastic and 15-minute candles', () => {
   assert.equal(x.stDir, 1);
   assert.equal(x.trend15, 'UP');
 });
+
+test('candles: Upstox intraday rows parsed oldest first', async () => {
+  const { barsFromUpstox } = await import('../api/candles.js');
+  const b = barsFromUpstox({ data: { candles: [['2026-11-12T09:20:00+05:30', 101, 103, 100, 102, 50, 0], ['2026-11-12T09:15:00+05:30', 100, 102, 99, 101, 40, 0]] } });
+  assert.equal(b.length, 2);
+  assert.equal(b[0].o, 100);
+  assert.equal(b[0].t, Date.parse('2026-11-12T03:45:00Z') / 1000);
+  assert.equal(barsFromUpstox({ data: { candles: [] } }), null);
+});

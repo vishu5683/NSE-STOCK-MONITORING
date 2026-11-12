@@ -197,7 +197,7 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
         <>
           <ProChart bars={candles.bars} levels={dayLevels} cpr={cprBand} />
           <p className="muted small chart-legend">
-            5-min candles {candles.day} · blue = VWAP {isNum(candles.bars.at(-1)[6]) ? price(candles.bars.at(-1)[6]) : ''}{candles.vwapProxy ? ' (no volume, average price)' : ''} · orange / purple = EMA 9 / 15 · dashed = ORB, previous day high / low, SL, T1 · dotted = CPR · pinch or scroll to zoom
+            5-min candles {candles.day}{candles.source ? ` (${candles.source === 'upstox' ? 'Upstox' : 'Yahoo'})` : ''} · blue = VWAP {isNum(candles.bars.at(-1)[6]) ? price(candles.bars.at(-1)[6]) : ''}{candles.vwapProxy ? ' (no volume, average price)' : ''} · orange / purple = EMA 9 / 15 · dashed = ORB, previous day high / low, SL, T1 · dotted = CPR · pinch or scroll to zoom
           </p>
         </>
       ) : (
