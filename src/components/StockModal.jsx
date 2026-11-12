@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Change, SideBadge, ScoreBar } from './ui.jsx';
-import { PriceChart, RangeBar, CandleChart } from './Charts.jsx';
+import { PriceChart, RangeBar } from './Charts.jsx';
 import { fetchCandles, fetchDepth, marketOpenNow } from '../lib/liveApi.js';
+import ProChart from './ProChart.jsx';
 import { price, dec, mult, int } from '../lib/fmt.js';
 import { weeklyLabel, monthlyLabel, breakoutLabel } from '../lib/signals.js';
 import { pivots, orbStatus, pdStatus, gapLabel, patternTags, pcrSentiment, atmFor } from '../lib/intraday.js';
@@ -135,13 +136,18 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
   const [view, setView] = useState('today');
   const [wide] = useState(() => typeof window === 'undefined' || !window.matchMedia || window.matchMedia('(min-width: 681px)').matches);
   const showToday = view === 'today' && candles?.bars?.length > 1;
-  const dayLevels = [
-    { label: 'ORB H', value: s.orbHigh, color: 'var(--up)' },
-    { label: 'ORB L', value: s.orbLow, color: 'var(--down)' },
-    { label: 'PDH', value: s.pdh, color: 'var(--muted)' },
-    { label: 'PDL', value: s.pdl, color: 'var(--muted)' },
-    ...(plan ? [{ label: 'SL', value: plan.stop, color: 'var(--down)' }, { label: 'T1', value: plan.t1, color: 'var(--up)' }] : []),
-  ];
+  const cprBand = useMemo(() => (isNum(s.cprBc) ? { bc: s.cprBc, tc: s.cprTc } : null), [s.cprBc, s.cprTc]);
+  // memoised: the popup re-renders every few seconds (order book), the chart must not be rebuilt each time
+  const dayLevels = useMemo(
+    () => [
+      { label: 'ORB H', value: s.orbHigh, color: 'var(--up)' },
+      { label: 'ORB L', value: s.orbLow, color: 'var(--down)' },
+      { label: 'PDH', value: s.pdh, color: 'var(--muted)' },
+      { label: 'PDL', value: s.pdl, color: 'var(--muted)' },
+      ...(plan ? [{ label: 'SL', value: plan.stop, color: 'var(--down)' }, { label: 'T1', value: plan.t1, color: 'var(--up)' }] : []),
+    ],
+    [s.orbHigh, s.orbLow, s.pdh, s.pdl, plan?.stop, plan?.t1],
+  );
   const levels = plan
     ? [
         { label: 'Entry', value: plan.entry, color: 'var(--accent)' },
@@ -189,9 +195,9 @@ export default function StockModal({ stock: s, onClose, watched, onToggleWatch }
       )}
       {showToday ? (
         <>
-          <CandleChart bars={candles.bars} levels={dayLevels} cpr={isNum(s.cprBc) ? { bc: s.cprBc, tc: s.cprTc } : null} />
+          <ProChart bars={candles.bars} levels={dayLevels} cpr={cprBand} />
           <p className="muted small chart-legend">
-            Candles {candles.day} · blue line = VWAP{candles.vwapProxy ? ' (no volume, average price)' : ''} {isNum(candles.bars.at(-1)[6]) ? price(candles.bars.at(-1)[6]) : ''} · shaded band = CPR · ORB = first 15 min · PDH / PDL = previous day
+            Candles {candles.day} · blue = VWAP, orange / purple = EMA 9 / 15 · pinch or scroll to zoom{candles.vwapProxy ? ' (no volume, average price)' : ''} {isNum(candles.bars.at(-1)[6]) ? price(candles.bars.at(-1)[6]) : ''} · shaded band = CPR · ORB = first 15 min · PDH / PDL = previous day
           </p>
         </>
       ) : (

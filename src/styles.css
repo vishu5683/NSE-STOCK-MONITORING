@@ -589,3 +589,4 @@ button.index-card:hover { border-color: var(--accent); }
 .ob-row.sell strong { color: var(--down); }
 .orderbook .grid-stats { margin-top: 10px; }
 .grid-stats.greeks { margin-top: 4px; }
+.pro-chart { width: 100%; border-radius: 12px; background: var(--card2); overflow: hidden; }
