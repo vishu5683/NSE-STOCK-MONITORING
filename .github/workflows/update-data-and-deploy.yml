@@ -88,12 +88,43 @@ jobs:
 
       - name: Commit data (also triggers Vercel)
         if: github.event_name != 'push' && steps.fetch.outcome == 'success'
+        id: commit
+        # A push failure here (e.g. a transient permission/race error) must not skip the build+deploy
+        # below: the freshly-fetched files are already on disk, so GitHub Pages still gets them even
+        # if this particular push to main doesn't land. The next successful run pushes the catch-up commit.
+        continue-on-error: true
         run: |
           git config user.name "nsestocks-bot"
           git config user.email "actions@users.noreply.github.com"
           git add public/data/latest.json public/data/chain.json api/_instruments.json
-          # two refreshes can finish close together: on a rejected push, rebase onto the newer data and push again
-          git diff --cached --quiet || (git commit -m "data: refresh market data" && (git push || (git pull --rebase -X theirs && git push)))
+          # two refreshes can finish close together: on a rejected push, fetch+rebase onto the newer data and retry, twice
+          git diff --cached --quiet && exit 0
+          git commit -m "data: refresh market data"
+          for i in 1 2 3; do
+            git push && exit 0
+            echo "push attempt $i failed, fetching and rebasing before retry" >&2
+            git fetch origin main
+            git rebase -X theirs origin/main
+          done
+          git push
+
+      - name: Alert - open or update an issue when the commit/push failed
+        if: steps.commit.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Data commit/push failed';
+            const body = `The data refresh succeeded but committing/pushing it failed on ${new Date().toISOString()}.\n\n` +
+              `Vercel will keep showing the previous data until a run pushes successfully. GitHub Pages still got this run's data.\n\n` +
+              `Run log: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n` +
+              `If this keeps happening, check Settings > Actions > General > Workflow permissions is "Read and write permissions".`;
+            const open = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', per_page: 50 });
+            const existing = open.data.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body });
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body });
+            }
 
       - uses: actions/setup-node@v4
         with:
