@@ -32,6 +32,8 @@ export const FIELDS = [
   { key: 'volSpike', label: 'Volume Spike (x avg)', group: 'Technical', get: (r) => r.volSpike ?? null },
   { key: 'valueCr', label: 'Turnover (in Cr)', group: 'Technical', get: (r) => r.valueCr ?? null },
   { key: 'score', label: 'Setup Score (0-100)', group: 'Technical', get: (r) => r.score ?? null },
+  { key: 'distHi', label: 'Distance from 52W High (%)', group: 'Technical', get: (r) => r.distHi ?? null },
+  { key: 'distLo', label: 'Distance from 52W Low (%)', group: 'Technical', get: (r) => r.distLo ?? null },
 ];
 export const FIELD_BY_KEY = Object.fromEntries(FIELDS.map((f) => [f.key, f]));
 
@@ -64,6 +66,11 @@ export const PRESETS = [
   { name: 'Low Price + High EPS', conditions: [{ field: 'ltp', op: '<', value: '200' }, { field: 'netProfit', op: '>', value: '100' }] },
   { name: 'Momentum + Breakout', conditions: [{ field: 'chg1m', op: '>', value: '7' }, { field: 'rsi', op: '>', value: '55' }, { field: 'adx', op: '>', value: '22' }] },
   { name: 'Pullback Stocks (Trend Continuation)', conditions: [{ field: 'rsi', op: '>', value: '45' }, { field: 'rsi', op: '<', value: '60' }, { field: 'chg1m', op: '>', value: '0' }] },
+  { name: 'High Promoter Holding + High EPS', conditions: [{ field: 'promoter', op: '>', value: '50' }, { field: 'netProfit', op: '>', value: '50' }] },
+  { name: '52W Breakout + High Return', conditions: [{ field: 'distHi', op: '>=', value: '-0.5' }, { field: 'chg1m', op: '>', value: '7' }] },
+  { name: 'Price Band Based Breakout', conditions: [{ field: 'chg', op: '>', value: '5' }] },
+  { name: 'High Return over 1M + High Volume', conditions: [{ field: 'chg1m', op: '>', value: '10' }, { field: 'volSpike', op: '>', value: '2' }] },
+  { name: 'High Volume + High Return', conditions: [{ field: 'chg', op: '>', value: '3' }, { field: 'volSpike', op: '>', value: '2' }] },
 ];
 
 export const SAVE_KEY = 'nsestocks.lensScreens';
