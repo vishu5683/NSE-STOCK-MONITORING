@@ -139,6 +139,42 @@ def download(symbols: list[str]) -> dict[str, pd.DataFrame]:
     return frames
 
 
+def fill_missing_sessions(frames: dict[str, pd.DataFrame], tickers: list[str]) -> list[str]:
+    """Yahoo is sometimes a session late for some stocks (17-Nov-2026: 92 of 259 still ended on the
+    previous Friday). A stock whose candles stop before sessions the other stocks already have gets
+    those sessions from NSE's official end-of-day file, so its close and indicators are current.
+    Returns the symbols that were filled."""
+    from reconcile import nse_bhav
+
+    sessions = sorted({d.date() for t in tickers if t in frames for d in frames[t].index[-5:]})
+    bhav_cache: dict = {}
+    filled = []
+    for t in tickers:
+        df = frames.get(t)
+        if df is None or df.empty:
+            continue
+        missing = [d for d in sessions if d > df.index[-1].date()]
+        rows = []
+        for d in missing:
+            if d not in bhav_cache:
+                bhav_cache[d] = nse_bhav(d)
+            n = bhav_cache[d].get(t.removesuffix(".NS"))
+            if n and all(n.get(k) is not None for k in ("open", "high", "low", "close", "volume")):
+                rows.append((d, n))
+        if not rows:
+            continue
+        idx = pd.DatetimeIndex([pd.Timestamp(d) for d, _ in rows])
+        if df.index.tz is not None:
+            idx = idx.tz_localize(df.index.tz)
+        add = pd.DataFrame({
+            "Open": [n["open"] for _, n in rows], "High": [n["high"] for _, n in rows], "Low": [n["low"] for _, n in rows],
+            "Close": [n["close"] for _, n in rows], "Volume": [n["volume"] for _, n in rows],
+        }, index=idx)
+        frames[t] = pd.concat([df, add]).sort_index()
+        filled.append(t.removesuffix(".NS"))
+    return filled
+
+
 def build_row(df: pd.DataFrame, forming: bool) -> dict | None:
     if len(df) < MIN_BARS:
         return None
@@ -249,6 +285,13 @@ def main() -> int:
 
     print(f"Downloading {len(uni)} stocks + {len(INDICES)} indices ...")
     frames = download([yahoo_symbol(s) for s in uni["symbol"]] + [i[1] for i in INDICES])
+    try:
+        filled = fill_missing_sessions(frames, [yahoo_symbol(s) for s in uni["symbol"]])
+    except Exception as exc:  # NSE archive unreachable: publish what Yahoo has, the evening check reports it
+        print(f"  fill from NSE skipped: {exc}")
+        filled = []
+    if filled:
+        print(f"  {len(filled)} stocks were a session behind on Yahoo; filled from the NSE end-of-day file: {', '.join(filled[:15])}")
 
     ok_rows, failed = [], []
     last_dates = []
@@ -380,6 +423,7 @@ def main() -> int:
     zero_ratio = zero / max(1, len(stocks))
     age_days = (now.date() - ref_date).days
     with_vol = sum(1 for s in stocks if s["volSpike"] is not None)
+    behind = sum(1 for s in stocks if s.get("asOf") != ref_date.isoformat())
     health = [
         {"name": "Symbols loaded", "ok": len(stocks) >= 0.95 * len(uni), "detail": f"{len(stocks)} of {len(uni)}"},
         {"name": "Prices are moving", "ok": zero_ratio < 0.2, "detail": f"{zero} stocks show 0.00% change"},
@@ -389,6 +433,7 @@ def main() -> int:
         {"name": "F&O data (NSE bhavcopy)", "ok": fo_count >= 150, "detail": f"{fo_count} stocks, session {fo_date or 'not found'}"},
         {"name": "Delivery % (NSE)", "ok": deliv_n >= 0.8 * len(stocks), "detail": f"{deliv_n} of {len(stocks)}"},
         {"name": "Intraday (5-min) data", "ok": intraday_ok >= 0.8 * len(stocks), "detail": f"{intraday_ok} of {len(stocks)}"},
+        {"name": "All stocks on the latest session", "ok": behind == 0, "detail": f"{behind} of {len(stocks)} behind {ref_date.isoformat()}" + (f", {len(filled)} filled from NSE" if filled else "")},
     ]
     if zero_ratio > 0.5:
         print(f"ERROR: {zero}/{len(stocks)} stocks have 0.00% change. Feed looks broken. Keeping the previous file.")
@@ -410,6 +455,7 @@ def main() -> int:
             "universe": int(len(uni)),
             "loaded": len(stocks),
             "failed": sorted(set(failed)),
+            "filledFromNse": filled,
             "health": health,
             "notes": [
                 "Volume spike compares the last completed session with its 20-day average.",

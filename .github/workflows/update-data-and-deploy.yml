@@ -55,6 +55,11 @@ jobs:
           pip install -r data-pipeline/requirements.txt
           python data-pipeline/fetch_data.py
 
+      - name: Check data against the NSE end-of-day file (result in meta.recon)
+        if: steps.fetch.outcome == 'success'
+        continue-on-error: true
+        run: python data-pipeline/reconcile.py
+
       - name: Refresh Upstox instrument map (F&O expiries and futures keys roll every month)
         continue-on-error: true
         run: node scripts/build-instruments.mjs

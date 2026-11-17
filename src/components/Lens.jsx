@@ -146,7 +146,7 @@ export default function Lens({ rows, settings, meta, onOpen }) {
     prevKey.current = screenKey;
     if (!alertsOn || !prev || !sameScreen || !queryText(conditions)) return;
     const label = screenName.trim() || 'Lens screen';
-    const added = dispatchAlerts(label, [...next].filter((s) => !prev.has(s)).map((s) => ({ s, k: 'new' })));
+    const added = dispatchAlerts(label, [...next].filter((s) => !prev.has(s)).map((s) => { const r = matched.find((x) => x.s === s); return { s, k: 'new', p: r?.ltp, c: r?.chg }; }));
     if (!added.length) return;
     const text = `${label}: new match - ${added.map((a) => a.s).join(', ')}`;
     setToasts((t) => [{ id: Date.now(), text }, ...t].slice(0, 5));

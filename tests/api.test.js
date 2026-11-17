@@ -519,7 +519,11 @@ test('/api/telegram: server builds the text from known symbols, rejects free tex
   assert.equal(r.json.sent, 2);
   assert.match(calls[0].url, /^https:\/\/api\.telegram\.org\/botbot-tok\/sendMessage$/);
   assert.equal(calls[0].body.chat_id, '123456');
-  assert.equal(calls[0].body.text, `Momentum + Breakout\n${sym}: new match\n${sym2}: intraday BUY at 101.26`);
+  const lines = calls[0].body.text.split('\n');
+  assert.equal(lines[0], '📡 Momentum + Breakout');
+  assert.equal(lines[1], `• ${sym}`);
+  assert.equal(lines[2], `• ${sym2}: intraday BUY ₹101.26`);
+  assert.match(lines[3], /^🕒 \d\d:\d\d IST$/);
 
   // same screen + symbol + kind again the same day (second tab, second viewer, flapping): not resent
   const again = await call(telegramApi, { method: 'POST', body: { screen: 'Momentum + Breakout', items: [{ s: sym, k: 'new' }] }, ip: '7.7.7.2' });
@@ -569,6 +573,7 @@ function fakeUpstash() {
       case 'DEL': return [hashes.delete(key), sets.delete(key), strings.delete(key)].some(Boolean) ? 1 : 0;
       case 'SADD': { const s = sets.get(key) || new Set(); const had = s.has(args[0]); s.add(args[0]); sets.set(key, s); return had ? 0 : 1; }
       case 'EXPIRE': return 1;
+      case 'HINCRBY': { const h = hashes.get(key) || new Map(); const v = Number(h.get(args[0]) || 0) + Number(args[1]); h.set(args[0], String(v)); hashes.set(key, h); return v; }
       case 'GET': return strings.get(key) ?? null;
       case 'SET': if (args.includes('NX') && strings.has(key)) return null; strings.set(key, args[0]); return 'OK';
       default: throw new Error(`fake upstash: ${cmd}`);
@@ -621,7 +626,8 @@ test('watch + scan: baseline, new match alert, no repeat, edited screen re-basel
   ltp = 100;
   const s2 = await scan();
   assert.equal(s2.json.sent, 1);
-  assert.equal(telegrams.at(-1), `Cheap\n${sym}: new match`);
+  assert.deepEqual(telegrams.at(-1).split('\n').slice(0, 3), ['📡 Cheap', 'LTP < 150', `• ${sym} ₹100.00`]);
+  assert.equal(up.hashes.get(`alert:count:${telegramLib.istDay()}`)?.get('Cheap'), '1', 'counted for the day summary');
   const s3 = await scan();
   assert.equal(s3.json.sent, 0, 'still matching: no repeat');
 
@@ -702,5 +708,67 @@ test('/api/oi: a fresh snapshot in Redis is served without calling Upstox; a bus
     oiLib.resetOiCache();
     delete process.env.UPSTASH_REDIS_REST_URL;
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  }
+});
+
+test('scan helpers: Upstox vs Yahoo cross-check, session detection, token expiry', async () => {
+  const now = Date.parse('2026-11-18T05:00:00Z'); // Wed 10:30 IST
+  const fresh = new Date(now - 60_000).toISOString();
+  const gaps = scanLib.divergent({ A: { ltp: 100 }, B: { ltp: 100 }, C: { ltp: 100 } }, { A: { ltp: 100.4, t: fresh }, B: { ltp: 103, t: fresh }, C: { ltp: 110, t: new Date(now - 10 * 60_000).toISOString() } }, now);
+  assert.deepEqual(gaps.map((g) => g.s), ['B'], 'small gap passes, big gap held, stale Yahoo ignored');
+  assert.equal(scanLib.sessionToday({ stocks: { A: { iAt: '2026-11-18T04:55:00Z' } } }, now), true);
+  assert.equal(scanLib.sessionToday({ stocks: { A: { iAt: '2026-11-17T09:55:00Z' } } }, now), false, 'only yesterday bars: holiday');
+  assert.equal(scanLib.sessionToday(null, now), null);
+  const { tokenExpiry } = await import('../api/_lib/daily.js');
+  const jwt = `x.${Buffer.from(JSON.stringify({ exp: 1800000000 })).toString('base64url')}.y`;
+  assert.equal(tokenExpiry(jwt), 1800000000 * 1000);
+  assert.equal(tokenExpiry('not-a-jwt'), null);
+});
+
+test('daily messages: open, close summary, health report', async () => {
+  const daily = await import('../api/_lib/daily.js');
+  const up = fakeUpstash();
+  process.env.UPSTASH_REDIS_REST_URL = 'https://fake.upstash.io';
+  process.env.UPSTASH_REDIS_REST_TOKEN = 'redis-tok';
+  process.env.TELEGRAM_BOT_TOKEN = 'bot-tok';
+  process.env.TELEGRAM_CHAT_ID = '111';
+  process.env.TELEGRAM_OWNER_CHAT_ID = '999';
+  delete process.env.UPSTOX_ANALYTICS_TOKEN;
+  intradayLib.resetIntradayCache();
+  yahoo.resetYahooCache();
+  const sent = [];
+  global.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.startsWith('https://fake.upstash.io')) return { ok: true, status: 200, json: async () => up.handle(u, JSON.parse(opts.body)) };
+    if (u.includes('api.telegram.org')) { const b = JSON.parse(opts.body); sent.push([b.chat_id, b.text]); return { ok: true, status: 200, json: async () => ({ ok: true }) }; }
+    if (u === 'https://nse.example/data/latest.json') return { ok: true, status: 200, json: async () => ({ meta: { generatedAtIST: '18-Nov-2026 07:00 PM IST', lastTradingDate: '2026-11-18', health: [{ name: 'Symbols loaded', ok: true, detail: '259 of 259' }, { name: 'All stocks on the latest session', ok: false, detail: '3 of 259 behind' }], recon: { date: '2026-11-18', status: 'mismatch', checked: 256, mismatched: 1, items: [{ s: 'ABC', field: 'close', ours: 10, nse: 11, diffPct: -9.09 }] }, filledFromNse: ['X', 'Y'] }, stocks: [] }) };
+    if (u === 'https://nse.example/data/fundamentals.json') return { ok: true, status: 200, json: async () => ({ asOf: new Date().toISOString(), ok: 259 }) };
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  try {
+    up.hashes.set('lens:watch', new Map([['Pullback', JSON.stringify({ name: 'Pullback', conditions: [{ field: 'ltp', op: '>', value: '1' }] })]]));
+    const o = await daily.dailyOpen();
+    assert.equal(o.ok, true);
+    assert.equal(sent.at(-1)[0], '111');
+    assert.match(sent.at(-1)[1], /NSE Stocks Pro is running[\s\S]*Watching 1 screen\(s\):\n• Pullback/);
+
+    assert.match(sent.at(-1)[1], /Live prices: (not available right now|Yahoo)/);
+    const c0 = await daily.dailyClose();
+    assert.equal(c0.total, 0);
+    assert.match(sent.at(-1)[1], /no new matches today on the 1 watched screen/);
+    up.hashes.set(`alert:count:${telegramLib.istDay()}`, new Map([['Pullback', '3']]));
+    await daily.dailyClose();
+    assert.match(sent.at(-1)[1], /3 new match alert\(s\)\n• Pullback: 3/);
+
+    const h = await daily.dailyHealth('https://nse.example');
+    assert.equal(h.recon, 'mismatch');
+    assert.equal(sent.at(-1)[0], '999', 'health goes to the owner chat');
+    assert.match(sent.at(-1)[1], /❌ 1 of 256 differ\n  ABC close: ours 10 vs NSE 11/);
+    assert.match(sent.at(-1)[1], /❌ All stocks on the latest session: 3 of 259 behind/);
+    assert.match(sent.at(-1)[1], /Filled from NSE \(Yahoo was late\): 2/);
+  } finally {
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    delete process.env.TELEGRAM_OWNER_CHAT_ID;
   }
 });

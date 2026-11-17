@@ -83,9 +83,9 @@ const alertState = (r) => ({ match: r.match.tone === 'up' || r.match.tone === 'd
 function alertEvents(prev, r) {
   const now = alertState(r);
   const out = [];
-  if (now.match && now.match !== prev.match) out.push({ s: r.s, k: r.match.tone === 'up' ? 'bull' : 'bear', text: `${r.s}: ${now.match}`, tone: r.match.tone });
-  if ((now.sig === 'BUY' || now.sig === 'SELL') && now.sig !== prev.sig) out.push({ s: r.s, k: now.sig === 'BUY' ? 'buy' : 'sell', p: r.ltp, text: `${r.s}: intraday ${sigText(r.intra)} at ${price(r.ltp)}`, tone: now.sig === 'BUY' ? 'up' : 'down' });
-  if ((now.orb === 'up' || now.orb === 'down') && now.orb !== prev.orb && prev.orb === 'inside') out.push({ s: r.s, k: now.orb === 'up' ? 'orb_up' : 'orb_down', text: `${r.s}: ${orbStatus(r).label}`, tone: now.orb });
+  if (now.match && now.match !== prev.match) out.push({ s: r.s, k: r.match.tone === 'up' ? 'bull' : 'bear', p: r.ltp, c: r.chg, text: `${r.s}: ${now.match}`, tone: r.match.tone });
+  if ((now.sig === 'BUY' || now.sig === 'SELL') && now.sig !== prev.sig) out.push({ s: r.s, k: now.sig === 'BUY' ? 'buy' : 'sell', p: r.ltp, c: r.chg, text: `${r.s}: intraday ${sigText(r.intra)} at ${price(r.ltp)}`, tone: now.sig === 'BUY' ? 'up' : 'down' });
+  if ((now.orb === 'up' || now.orb === 'down') && now.orb !== prev.orb && prev.orb === 'inside') out.push({ s: r.s, k: now.orb === 'up' ? 'orb_up' : 'orb_down', p: r.ltp, c: r.chg, text: `${r.s}: ${orbStatus(r).label}`, tone: now.orb });
   return out;
 }
 const has = (x) => typeof x === 'number' && Number.isFinite(x);

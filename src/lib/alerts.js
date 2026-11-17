@@ -55,7 +55,7 @@ export function dispatchAlerts(screen, items, now = Date.now()) {
   fetch('./api/telegram', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
-    body: JSON.stringify({ screen, items: fresh.slice(0, 10).map(({ s, k, p }) => ({ s, k, p })) }),
+    body: JSON.stringify({ screen, items: fresh.slice(0, 10).map(({ s, k, p, c }) => ({ s, k, p, c })) }),
   }).catch(() => {});
   return fresh;
 }

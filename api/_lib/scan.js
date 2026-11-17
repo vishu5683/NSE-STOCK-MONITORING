@@ -12,11 +12,14 @@ import { analyseAll } from '../../src/lib/signals.js';
 import { runQuery, queryText, FIELD_BY_KEY, OPS } from '../../src/lib/lens.js';
 import { liveQuotes } from '../quotes.js';
 import { getIntraday } from './intraday.js';
+import { yahooQuotesFor } from './yahoo.js';
 import { redis, pipeline, pairsToObject } from './redis.js';
-import { cleanScreen, deliver } from './telegram.js';
+import { cleanScreen, deliver, ownerOnce, istDay } from './telegram.js';
 
 export const MAX_WATCH = 20;
 const MAX_CONDITIONS = 8;
+const CROSS_CHECK_PCT = 1; // Upstox vs Yahoo price gap that holds an alert back
+const CROSS_CHECK_FRESH_MS = 3 * 60_000;
 
 // -> { name, sector, conditions } or { error }
 export function parseScreen(body) {
@@ -46,6 +49,7 @@ export function buildRows(latest, live, intra, screener, fund) {
 
 // Pure: which stocks are new on each screen. lastMap values are JSON strings from Redis.
 export function diffScreens(rows, screens, lastMap) {
+  const bySym = new Map(rows.map((r) => [r.s, r]));
   const alerts = [];
   const nextLast = {};
   for (const sc of screens) {
@@ -62,9 +66,35 @@ export function diffScreens(rows, screens, lastMap) {
     if (!prev || prev.key !== key) continue; // first run or edited screen: baseline only
     const before = new Set(prev.syms);
     const added = syms.filter((s) => !before.has(s));
-    if (added.length) alerts.push({ screen: sc.name, items: added.map((s) => ({ s, k: 'new' })) });
+    if (added.length) {
+      alerts.push({
+        screen: sc.name,
+        detail: `${sc.sector ? `${sc.sector}: ` : ''}${queryText(sc.conditions)}`,
+        items: added.map((s) => ({ s, k: 'new', p: bySym.get(s)?.ltp ?? null, c: bySym.get(s)?.chg ?? null })),
+      });
+    }
   }
   return { alerts, nextLast };
+}
+
+// Upstox price vs a fresh Yahoo price for the symbols about to be alerted. A gap above
+// CROSS_CHECK_PCT holds that alert back (it is re-checked on the next scan).
+export function divergent(liveQuotesMap, yahoo, now = Date.now()) {
+  const out = [];
+  for (const [s, y] of Object.entries(yahoo || {})) {
+    const u = liveQuotesMap?.[s]?.ltp;
+    if (!u || !y?.ltp || !y.t || now - Date.parse(y.t) > CROSS_CHECK_FRESH_MS) continue;
+    const gap = Math.abs(u / y.ltp - 1) * 100;
+    if (gap > CROSS_CHECK_PCT) out.push({ s, upstox: u, yahoo: y.ltp, gap: Math.round(gap * 100) / 100 });
+  }
+  return out;
+}
+
+// Newest 5-minute bar across all stocks -> was there an NSE session today?
+export function sessionToday(intra, now = Date.now()) {
+  const times = Object.values(intra?.stocks || {}).map((x) => x?.iAt).filter(Boolean).sort();
+  if (!times.length) return null; // unknown
+  return istDay(Date.parse(times[times.length - 1])) === istDay(now);
 }
 
 async function getJson(url) {
@@ -72,6 +102,7 @@ async function getJson(url) {
   if (!res.ok) throw new Error(`${url} HTTP ${res.status}`);
   return res.json();
 }
+export { getJson };
 
 export async function loadWatch() {
   const all = pairsToObject(await redis('HGETALL', 'lens:watch'));
@@ -88,7 +119,7 @@ export async function loadWatch() {
 
 export async function runScan(base, now = Date.now()) {
   const screens = await loadWatch();
-  const summary = { at: new Date(now).toISOString(), screens: screens.length, alerts: 0, sent: 0, source: null, notes: [] };
+  const summary = { at: new Date(now).toISOString(), screens: screens.length, alerts: 0, sent: 0, held: 0, source: null, notes: [] };
   if (screens.length) {
     const [latest, fund, config] = await Promise.all([
       getJson(`${base}/data/latest.json`),
@@ -100,6 +131,7 @@ export async function runScan(base, now = Date.now()) {
       const q = await liveQuotes();
       live = { quotes: shape(q.quotes, q.asOf), indices: shape(q.indices, q.asOf) };
       summary.source = q.source || 'yahoo';
+      if (summary.source !== 'upstox') await ownerOnce('upstox-down', `⚠️ Upstox is not answering; live prices come from Yahoo (backup).\n${q.fallbackReason || ''}`.trim(), now).catch(() => {});
     } catch (e) {
       summary.notes.push(`no live prices: ${e.message}`);
     }
@@ -109,25 +141,45 @@ export async function runScan(base, now = Date.now()) {
     } catch (e) {
       summary.notes.push(`no intraday layer: ${e.message}`);
     }
-    const rows = buildRows(latest, live, intra, config?.screener || {}, fund?.stocks);
-    const lastMap = pairsToObject(await redis('HGETALL', 'lens:last'));
-    const { alerts, nextLast } = diffScreens(rows, screens, lastMap);
-    await pipeline([['DEL', 'lens:last'], ['HSET', 'lens:last', ...Object.entries(nextLast).flat()]]);
-    for (const a of alerts) {
-      summary.alerts += a.items.length;
-      const r = await deliver(a.screen, a.items);
-      summary.sent += r.sent;
-      if (!r.ok) summary.notes.push(`telegram: ${r.reason}`);
+    if (sessionToday(intra, now) === false) {
+      summary.noSession = true; // NSE holiday: keep the baseline as it is
+    } else {
+      let rows = buildRows(latest, live, intra, config?.screener || {}, fund?.stocks);
+      const lastMap = pairsToObject(await redis('HGETALL', 'lens:last'));
+      let { alerts, nextLast } = diffScreens(rows, screens, lastMap);
+      const candidates = [...new Set(alerts.flatMap((a) => a.items.map((i) => i.s)))];
+      if (candidates.length && summary.source === 'upstox') {
+        try {
+          const gaps = divergent(live.quotes, await yahooQuotesFor(candidates, now), now);
+          if (gaps.length) {
+            const held = new Set(gaps.map((g) => g.s));
+            summary.held = held.size;
+            rows = rows.filter((r) => !held.has(r.s));
+            ({ alerts, nextLast } = diffScreens(rows, screens, lastMap));
+            const lines = gaps.slice(0, 10).map((g) => `• ${g.s}: Upstox ${g.upstox} vs Yahoo ${g.yahoo} (${g.gap}%)`);
+            await ownerOnce(`gap:${gaps.map((g) => g.s).sort().join(',')}`, `⚠️ Price check: alert held back, sources disagree by more than ${CROSS_CHECK_PCT}%\n${lines.join('\n')}`, now).catch(() => {});
+          }
+        } catch (e) {
+          summary.notes.push(`cross-check skipped: ${e.message}`);
+        }
+      }
+      await pipeline([['DEL', 'lens:last'], ['HSET', 'lens:last', ...Object.entries(nextLast).flat()]]);
+      for (const a of alerts) {
+        summary.alerts += a.items.length;
+        const r = await deliver(a.screen, a.items, a.detail);
+        summary.sent += r.sent;
+        if (!r.ok) summary.notes.push(`telegram: ${r.reason}`);
+      }
     }
   }
   await redis('SET', 'scan:last', JSON.stringify(summary));
   return summary;
 }
 
-// Mon-Fri 09:00-16:00 IST. Outside that the scanner does nothing unless forced.
+// Mon-Fri 09:15-15:35 IST (pre-open prices are not scanned). Outside that the scanner does nothing unless forced.
 export function marketWindow(now = Date.now()) {
   const d = new Date(now + 5.5 * 3600 * 1000);
   const day = d.getUTCDay();
   const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
-  return day >= 1 && day <= 5 && mins >= 9 * 60 && mins <= 16 * 60;
+  return day >= 1 && day <= 5 && mins >= 9 * 60 + 15 && mins <= 15 * 60 + 35;
 }

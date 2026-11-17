@@ -98,6 +98,14 @@ export async function getYahooQuotes(now = Date.now()) {
   return inflight;
 }
 
+// Latest Yahoo prices for a few stocks (cross-checking an alert before it goes out).
+export async function yahooQuotesFor(symbols, nowMs = Date.now()) {
+  const list = [...new Set(symbols)].filter((s) => tickerToTarget.has(`${s}.NS`)).map((s) => `${s}.NS`);
+  const maps = [];
+  for (let i = 0; i < list.length; i += BATCH) maps.push(await fetchBatch(list.slice(i, i + BATCH)));
+  return normaliseYahoo(maps, nowMs).quotes;
+}
+
 export function resetYahooCache() {
   cache = null;
   inflight = null;
