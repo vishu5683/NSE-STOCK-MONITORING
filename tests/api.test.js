@@ -554,8 +554,8 @@ test('/api/feed-url: one-time WebSocket URL + key map, token stays on the server
 
 // ---------- server-side Lens alerts: /api/watch + /api/scan with an in-memory fake of Upstash ----------
 const scanLib = await import('../api/_lib/scan.js');
-const { default: scanApi } = await import('../api/scan.js');
-const { default: watchApi } = await import('../api/watch.js');
+const { default: lensApi } = await import('../api/lens.js');
+
 
 function fakeUpstash() {
   const hashes = new Map();
@@ -606,12 +606,12 @@ test('watch + scan: baseline, new match alert, no repeat, edited screen re-basel
     const res = { statusCode: 200, setHeader() {}, end(t) { resolve({ status: this.statusCode, json: JSON.parse(t) }); } };
     Promise.resolve(handler({ method, url, headers: { host: 'nse.example', 'x-forwarded-for': '8.8.8.8', ...headers }, body }, res));
   });
-  const scan = () => run(scanApi, { url: '/api/scan?force=1', headers: { authorization: 'Bearer cron-secret-123' } });
+  const scan = () => run(lensApi, { url: '/api/lens?scan=1&force=1', headers: { authorization: 'Bearer cron-secret-123' } });
 
-  assert.equal((await run(scanApi, { url: '/api/scan?force=1' })).status, 401, 'scanner needs the cron secret');
-  const bad = await run(watchApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'nope', op: '<', value: '1' }] } });
+  assert.equal((await run(lensApi, { url: '/api/lens?scan=1&force=1' })).status, 401, 'scanner needs the cron secret');
+  const bad = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'nope', op: '<', value: '1' }] } });
   assert.equal(bad.status, 400);
-  const add = await run(watchApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '150' }] } });
+  const add = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '150' }] } });
   assert.equal(add.status, 200);
   assert.equal(add.json.screens[0].name, 'Cheap');
 
@@ -630,13 +630,13 @@ test('watch + scan: baseline, new match alert, no repeat, edited screen re-basel
   assert.equal((await scan()).json.sent, 0);
 
   // editing the watched screen re-baselines instead of alerting
-  await run(watchApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '120' }] } });
+  await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '120' }] } });
   assert.equal((await scan()).json.alerts, 0);
 
-  const list = await run(watchApi, { headers: auth0 });
+  const list = await run(lensApi, { headers: auth0 });
   assert.equal(list.json.configured, true);
   assert.ok(list.json.lastScan?.at);
-  const rm = await run(watchApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Cheap' } });
+  const rm = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Cheap' } });
   assert.equal(rm.json.screens.length, 0);
   assert.equal(telegrams.length, 1);
 
@@ -651,4 +651,10 @@ test('scan helpers: screen validation and market window', () => {
   assert.equal(scanLib.marketWindow(Date.parse('2026-11-18T05:00:00Z')), true); // Wed 10:30 IST
   assert.equal(scanLib.marketWindow(Date.parse('2026-11-18T12:00:00Z')), false); // Wed 17:30 IST
   assert.equal(scanLib.marketWindow(Date.parse('2026-11-21T05:00:00Z')), false); // Sat
+});
+
+test('Vercel Hobby limit: at most 12 serverless functions in api/', async () => {
+  const { readdirSync } = await import('node:fs');
+  const fns = readdirSync(new URL('../api/', import.meta.url)).filter((f) => f.endsWith('.js') && !f.startsWith('_'));
+  assert.ok(fns.length <= 12, `${fns.length} functions: ${fns.join(', ')} -- a 13th makes the whole deployment fail`);
 });

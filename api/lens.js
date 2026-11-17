@@ -3,16 +3,31 @@ import { bearer, verifyToken, loginRequired } from './_lib/auth.js';
 import { originAllowed } from './_lib/origin.js';
 import { redis, redisConfigured } from './_lib/redis.js';
 import { allowRate, cleanScreen } from './_lib/telegram.js';
-import { loadWatch, parseScreen, MAX_WATCH } from './_lib/scan.js';
+import { loadWatch, parseScreen, runScan, marketWindow, MAX_WATCH } from './_lib/scan.js';
 
-// Lens screens watched by the server-side scanner (alerts even when no browser is open).
-// GET    -> { configured, screens, lastScan }
-// POST   { action: 'add', name, sector, conditions } | { action: 'remove', name }
-export default async function handler(req, res) {
+// One function for server-side Lens alerts (Vercel Hobby allows 12 functions per deployment).
+//
+//   GET  /api/lens?scan=1[&force=1]   scanner, called every 2 min by cron-job.org with
+//                                     "Authorization: Bearer <CRON_SECRET>"; Mon-Fri 09:00-16:00 IST only
+//   GET  /api/lens                    { configured, screens, lastScan }
+//   POST /api/lens                    { action: 'add', name, sector, conditions } | { action: 'remove', name }
+async function scan(req, res) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers?.authorization !== `Bearer ${secret}`) return send(res, 401, { error: 'UNAUTHORIZED', message: 'Only the scheduler may call this.' });
+  if (!redisConfigured()) return send(res, 503, { error: 'REDIS_NOT_CONFIGURED', message: 'Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.' });
+  const force = /[?&]force=1\b/.test(req.url || '');
+  if (!force && !marketWindow()) return send(res, 200, { ok: true, skipped: 'outside market hours' });
+  try {
+    return send(res, 200, { ok: true, ...(await runScan(`https://${req.headers.host}`)) });
+  } catch (err) {
+    return send(res, 502, { error: 'SCAN_FAILED', message: err.message });
+  }
+}
+
+async function watch(req, res) {
   if (!originAllowed(req)) return send(res, 403, { error: 'FORBIDDEN_ORIGIN' });
   if (loginRequired() && !verifyToken(bearer(req))) return send(res, 401, { error: 'UNAUTHORIZED' });
   if (!redisConfigured()) return send(res, 200, { configured: false, screens: [] });
-
   try {
     if (req.method === 'GET') {
       const [screens, last] = await Promise.all([loadWatch(), redis('GET', 'scan:last')]);
@@ -46,4 +61,9 @@ export default async function handler(req, res) {
   } catch (err) {
     return send(res, 502, { error: 'REDIS', message: err.message });
   }
+}
+
+export default function handler(req, res) {
+  if (req.method === 'GET' && /[?&]scan=1\b/.test(req.url || '')) return scan(req, res);
+  return watch(req, res);
 }

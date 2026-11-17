@@ -246,11 +246,11 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 - Tests: 55/55 (`lens.test.js` added), `npm run build` clean. Not yet checked against a live, populated `fundamentals.json` (first daily run hasn't fired yet) or on a real phone.
 
 ### 20. Server-side Lens alerts (18-Nov-2026) -- alerts with no browser open
-- Lens "📡 Watch" adds the current screen (name + sector + conditions) to Upstash Redis (`/api/watch`, max 20). Watched screens show as chips; "Update watch" when the screen was edited.
-- cron-job.org calls `GET /api/scan` every 2 min with `Authorization: Bearer <CRON_SECRET>` (same secret as Vercel Cron's `/api/cron-refresh`). It runs only Mon-Fri 09:00-16:00 IST (`?force=1` overrides).
-- `/api/scan` builds the same rows as the browser by importing `src/lib/live.js`, `signals.js`, `lens.js` (data from `/data/latest.json`, `/data/fundamentals.json`, `/config.json` of this deployment + `liveQuotes()` (Upstox, Yahoo fallback) + `getIntraday()`), diffs each watched screen against `lens:last`, sends new matches via `deliver()`.
+- Lens "📡 Watch" adds the current screen (name + sector + conditions) to Upstash Redis (`/api/lens`, max 20; one function for watch + scan because Vercel Hobby allows 12 functions). Watched screens show as chips; "Update watch" when the screen was edited.
+- cron-job.org calls `GET /api/lens?scan=1` every 2 min with `Authorization: Bearer <CRON_SECRET>` (same secret as Vercel Cron's `/api/cron-refresh`). It runs only Mon-Fri 09:00-16:00 IST (`?force=1` overrides).
+- The scan builds the same rows as the browser by importing `src/lib/live.js`, `signals.js`, `lens.js` (data from `/data/latest.json`, `/data/fundamentals.json`, `/config.json` of this deployment + `liveQuotes()` (Upstox, Yahoo fallback) + `getIntraday()`), diffs each watched screen against `lens:last`, sends new matches via `deliver()`.
 - First scan of a new or edited screen only sets the baseline. Dedupe `alert:sent:<IST day>` is a Redis set shared by browser `/api/telegram`, every function instance and the scanner, so no repeats across viewers either.
-- Env (Vercel): `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (+ existing `CRON_SECRET`, `TELEGRAM_*`). Without Upstash, Watch is hidden and `/api/scan` answers 503.
+- Env (Vercel): `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (+ existing `CRON_SECRET`, `TELEGRAM_*`). Without Upstash, Watch is hidden and the scan answers 503.
 - Lens remembers the last screen across reloads (`nsestocks.lensActive`).
 - Pro Sheet (Scanners) alerts are still browser-only.
 

@@ -27,7 +27,7 @@ function writeSent(day, keys) {
 // Server-side watch list (alerts with no browser open). null when the backend is not reachable.
 async function watchCall(init) {
   try {
-    const res = await fetch('./api/watch', { ...init, headers: { 'Content-Type': 'application/json', ...authHeader(), ...(init?.headers || {}) } });
+    const res = await fetch('./api/lens', { ...init, headers: { 'Content-Type': 'application/json', ...authHeader(), ...(init?.headers || {}) } });
     const body = await res.json().catch(() => null);
     return res.ok ? body : { error: body?.error || `HTTP ${res.status}`, message: body?.message };
   } catch {
