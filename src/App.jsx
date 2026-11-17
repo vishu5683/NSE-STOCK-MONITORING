@@ -23,7 +23,7 @@ const TABS = [
   { id: 'screener', label: 'Screener', icon: 'M3 5h18l-7 8v6l-4 2v-8z' },
   { id: 'lens', label: 'Lens', icon: 'M11 2a9 9 0 105.3 16.3L21 23l1.4-1.4-4.7-4.7A9 9 0 0011 2zm0 2a7 7 0 110 14 7 7 0 010-14z' },
   ...(DOWNLOADS_ENABLED ? [{ id: 'reports', label: 'Reports', icon: 'M12 3v12m0 0l-5-5m5 5l5-5M4 21h16' }] : []),
-  { id: 'admin', label: 'Admin', icon: 'M7 10V7a5 5 0 0110 0v3M5 10h14v11H5z' },
+  // { id: 'admin', label: 'Admin', icon: 'M7 10V7a5 5 0 0110 0v3M5 10h14v11H5z' },
 ];
 const REFRESH_MS = 10 * 60 * 1000;
 
