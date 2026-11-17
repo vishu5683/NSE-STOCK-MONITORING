@@ -19,6 +19,7 @@ on:
     paths-ignore:
       - 'public/data/latest.json'
       - 'public/data/chain.json'
+      - 'public/data/fundamentals.json'
       - '**.md'
 
 permissions:

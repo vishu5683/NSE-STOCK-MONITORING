@@ -1,0 +1,46 @@
+name: Refresh fundamentals (Lens)
+
+# Separate from update-data-and-deploy.yml on purpose: fundamentals (P/E, P/B, debt-to-equity,
+# net profit, market cap) move slowly (quarterly results), so this runs once a day, not every
+# intraday refresh, and a failure here must never block the price/data workflow.
+on:
+  schedule:
+    - cron: '0 2 * * 1-5'   # 07:30 IST, well before market open
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: data-pipeline/requirements.txt
+
+      - run: pip install -r data-pipeline/requirements.txt
+
+      - name: Fetch fundamentals
+        id: fetch
+        continue-on-error: true
+        run: python data-pipeline/fundamentals.py
+
+      - name: Commit public/data/fundamentals.json
+        if: steps.fetch.outcome == 'success'
+        run: |
+          git config user.name "nsestocks-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add public/data/fundamentals.json
+          git diff --cached --quiet && exit 0
+          git commit -m "data: refresh fundamentals (Lens)"
+          for i in 1 2 3; do
+            git push && exit 0
+            git fetch origin main
+            git rebase -X theirs origin/main
+          done
+          git push

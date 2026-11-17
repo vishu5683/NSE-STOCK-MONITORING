@@ -590,3 +590,22 @@ button.index-card:hover { border-color: var(--accent); }
 .orderbook .grid-stats { margin-top: 10px; }
 .grid-stats.greeks { margin-top: 4px; }
 .pro-chart { width: 100%; border-radius: 12px; background: var(--card2); overflow: hidden; }
+
+/* ---------- Lens (query-builder screener) ---------- */
+.lens { display: flex; flex-direction: column; gap: 14px; }
+.lens-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.lens-head h2 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 18px; }
+.lens-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.lens-query { display: flex; flex-direction: column; gap: 6px; }
+.lens-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.lens-row .input:first-child { flex: 2; min-width: 180px; }
+.lens-op { flex: 0 0 72px; min-width: 64px; }
+.lens-val { flex: 0 0 110px; min-width: 90px; }
+.lens-and { font-size: 11.5px; font-weight: 700; color: var(--muted); padding-left: 2px; letter-spacing: 0.04em; }
+.lens-query-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.lens-query-text { margin-top: 4px; font-family: ui-monospace, monospace; }
+.lens-saved-chip { display: inline-flex; align-items: center; gap: 2px; }
+@media (max-width: 680px) {
+  .lens-row .input:first-child { flex: 1 1 100%; }
+  .lens-op, .lens-val { flex: 1 1 45%; }
+}

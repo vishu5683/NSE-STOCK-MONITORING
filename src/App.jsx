@@ -8,6 +8,7 @@ import { logout, LOGIN_ENABLED } from './lib/auth.js';
 import Dashboard from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
 import Scanners from './components/Scanners.jsx';
+import Lens from './components/Lens.jsx';
 import Reports from './components/Reports.jsx';
 import { DOWNLOADS_ENABLED, WS_ENABLED } from './lib/features.js';
 import { startFeed } from './lib/liveFeed.js';
@@ -20,6 +21,7 @@ const TABS = [
   { id: 'scanners', label: 'Pro Sheet', icon: 'M4 18l5-6 4 3 7-9M4 4v16h16' },
   { id: 'dashboard', label: 'Dashboard', icon: 'M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z' },
   { id: 'screener', label: 'Screener', icon: 'M3 5h18l-7 8v6l-4 2v-8z' },
+  { id: 'lens', label: 'Lens', icon: 'M11 2a9 9 0 105.3 16.3L21 23l1.4-1.4-4.7-4.7A9 9 0 0011 2zm0 2a7 7 0 110 14 7 7 0 010-14z' },
   ...(DOWNLOADS_ENABLED ? [{ id: 'reports', label: 'Reports', icon: 'M12 3v12m0 0l-5-5m5 5l5-5M4 21h16' }] : []),
   { id: 'admin', label: 'Admin', icon: 'M7 10V7a5 5 0 0110 0v3M5 10h14v11H5z' },
 ];
@@ -453,6 +455,7 @@ export default function App() {
         {tab === 'screener' && (
           <Screener rows={rows} sectors={sectors} initialSector={sectorFilter} watchlist={settings.watchlist || []} onOpen={setPicked} onToggleWatch={toggleWatch} />
         )}
+        {tab === 'lens' && <Lens rows={rows} settings={settings} meta={meta} onOpen={setPicked} />}
         {DOWNLOADS_ENABLED && tab === 'reports' && <Reports ctx={ctx} />}
         {tab === 'admin' && <Admin settings={settings} onChange={updateSettings} meta={meta} universe={book.stocks.map((s) => s.s)} stocks={book.stocks} />}
       </main>
