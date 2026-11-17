@@ -9,6 +9,7 @@ import Dashboard from './components/Dashboard.jsx';
 import Screener from './components/Screener.jsx';
 import Scanners from './components/Scanners.jsx';
 import Lens from './components/Lens.jsx';
+import AlertsPanel from './components/AlertsPanel.jsx';
 import Reports from './components/Reports.jsx';
 import { DOWNLOADS_ENABLED, WS_ENABLED } from './lib/features.js';
 import { startFeed } from './lib/liveFeed.js';
@@ -386,6 +387,7 @@ export default function App() {
               {liveOn ? `${live.source === 'yahoo' ? 'Live (Yahoo)' : live.source === 'upstox-ws' ? 'Live ticks' : 'Upstox live'} · ${ageText(live.updatedAt) || 'now'}` : `${meta.lastTradingDate} · ${ageText(meta.generatedAt)}`}
             </span>
           </div>
+          <AlertsPanel onGoLens={() => go('lens')} />
           <button className="btn ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">
             {theme === 'dark' ? '☀' : '☾'}
           </button>

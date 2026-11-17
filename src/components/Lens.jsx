@@ -3,17 +3,11 @@ import { Card, Empty, Change } from './ui.jsx';
 import { price, dec, compact, int } from '../lib/fmt.js';
 import { exportTable } from '../lib/exporters.js';
 import { dispatchAlerts, getWatch, watchScreen, unwatchScreen } from '../lib/alerts.js';
+import { useAlertPref } from '../lib/alertPrefs.js';
 import { FIELDS, FIELD_BY_KEY, OPS, blankCondition, runQuery, queryText, PRESETS, PRESET_GROUPS, loadSavedScreens, saveScreen, deleteScreen } from '../lib/lens.js';
 
 const OP_LABEL = { '>': '>', '<': '<', '>=': '>=', '<=': '<=', '=': '=' };
 const ALERT_KEY = 'nsestocks.lensAlerts';
-const readFlag = (k) => {
-  try {
-    return localStorage.getItem(k) === '1';
-  } catch {
-    return false;
-  }
-};
 
 function fmtField(key, v) {
   if (v === null || v === undefined) return '-';
@@ -85,7 +79,7 @@ export default function Lens({ rows, settings, meta, onOpen }) {
     };
   }, []);
   const [saved, setSaved] = useState(() => loadSavedScreens());
-  const [alertsOn, setAlertsOn] = useState(() => readFlag(ALERT_KEY));
+  const alertsOn = useAlertPref(ALERT_KEY);
   const [toasts, setToasts] = useState([]);
   const matchedPrev = useRef(null);
   const [fundAsOf, setFundAsOf] = useState(null);
@@ -186,23 +180,6 @@ export default function Lens({ rows, settings, meta, onOpen }) {
     setWatchBusy(false);
   };
 
-  const toggleAlerts = async () => {
-    const on = !alertsOn;
-    if (on && 'Notification' in window && Notification.permission === 'default') {
-      try {
-        await Notification.requestPermission();
-      } catch {
-        /* toasts still work */
-      }
-    }
-    try {
-      localStorage.setItem(ALERT_KEY, on ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
-    setAlertsOn(on);
-  };
-
   const setCondition = (i, next) => setConditions((cs) => cs.map((c, j) => (j === i ? next : c)));
   const addCondition = () => setConditions((cs) => [...cs, blankCondition()]);
   const removeCondition = (i) => setConditions((cs) => cs.filter((_, j) => j !== i));
@@ -278,9 +255,6 @@ export default function Lens({ rows, settings, meta, onOpen }) {
                 {watchDirty ? '📡 Update watch' : watched ? '📡 Watching' : '📡 Watch'}
               </button>
             )}
-            <button className={`btn sm ${alertsOn ? 'primary' : 'ghost'}`} onClick={toggleAlerts} aria-pressed={alertsOn} title="Toast + Telegram while this page is open">
-              {alertsOn ? '🔔' : '🔕'} {alertsOn ? ' Alerts on' : ' Alerts off'}
-            </button>
           </div>
         </div>
         {watch?.configured && watch.screens?.length > 0 && (

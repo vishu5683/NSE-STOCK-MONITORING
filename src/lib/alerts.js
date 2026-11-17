@@ -24,14 +24,15 @@ function writeSent(day, keys) {
   }
 }
 
-// Server-side watch list (alerts with no browser open). null when the backend is not reachable.
+// Server-side watch list (alerts with no browser open). { error } when the backend is not reachable
+// (static hosting answers with an HTML page, so a non-JSON body counts as unreachable too).
 async function watchCall(init) {
   try {
     const res = await fetch('./api/lens', { ...init, headers: { 'Content-Type': 'application/json', ...authHeader(), ...(init?.headers || {}) } });
     const body = await res.json().catch(() => null);
-    return res.ok ? body : { error: body?.error || `HTTP ${res.status}`, message: body?.message };
+    return res.ok && body ? body : { error: body?.error || `HTTP ${res.status}`, message: body?.message };
   } catch {
-    return null;
+    return { error: 'UNREACHABLE' };
   }
 }
 export const getWatch = () => watchCall({ method: 'GET' });

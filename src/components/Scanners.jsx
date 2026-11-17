@@ -36,6 +36,7 @@ import { exportTable } from '../lib/exporters.js';
 import { DOWNLOADS_ENABLED } from '../lib/features.js';
 import { fetchChainLive } from '../lib/liveApi.js';
 import { dispatchAlerts } from '../lib/alerts.js';
+import { useAlertPref } from '../lib/alertPrefs.js';
 
 // Same tabs, same order as the client's Google Sheet.
 const VIEWS = [
@@ -69,13 +70,6 @@ function usePhone() {
 }
 const VIEW_KEY = 'nsestocks.scanView';
 const ALERT_KEY = 'nsestocks.alerts';
-const readFlag = (k) => {
-  try {
-    return localStorage.getItem(k) === '1';
-  } catch {
-    return false;
-  }
-};
 
 // What a stock is "doing" right now; an alert fires when this changes into something tradable.
 const alertState = (r) => ({ match: r.match.tone === 'up' || r.match.tone === 'down' ? r.match.label : '', sig: r.intra.signal, orb: orbStatus(r).kind });
@@ -305,7 +299,7 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
   });
   const [q, setQ] = useState('');
   const [chainOf, setChainOf] = useState(null);
-  const [alertsOn, setAlertsOn] = useState(() => readFlag(ALERT_KEY));
+  const alertsOn = useAlertPref(ALERT_KEY);
   const [toasts, setToasts] = useState([]);
   const lastState = useRef(null);
   const c = settings.screener;
@@ -362,23 +356,6 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
     const t = setTimeout(() => setToasts((x) => x.slice(0, -1)), 12000);
     return () => clearTimeout(t);
   }, [toasts]);
-  const toggleAlerts = async () => {
-    const on = !alertsOn;
-    if (on && 'Notification' in window && Notification.permission === 'default') {
-      try {
-        await Notification.requestPermission();
-      } catch {
-        /* toasts still work */
-      }
-    }
-    try {
-      localStorage.setItem(ALERT_KEY, on ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
-    setAlertsOn(on);
-  };
-
   const needle = q.trim().toUpperCase();
   const shown = needle
     ? enriched.filter((r) => r.s.includes(needle) || (r.sec || '').toUpperCase().includes(needle) || (r.name || '').toUpperCase().includes(needle))
@@ -424,10 +401,6 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
         title="F&O Pro Sheet"
         right={
           <div className="sheet-head-tools">
-            <button className={`btn sm ${alertsOn ? 'primary' : 'ghost'}`} onClick={toggleAlerts} aria-pressed={alertsOn} title="Toast + browser notification when a stock newly matches, gives an intraday BUY / SELL or breaks its opening range">
-              {alertsOn ? '🔔' : '🔕'}
-              <span className="alert-text">{alertsOn ? ' Alerts on' : ' Alerts off'}</span>
-            </button>
             <input className="input" placeholder="Search symbol, company or sector" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" />
           </div>
         }
