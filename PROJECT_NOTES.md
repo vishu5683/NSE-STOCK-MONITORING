@@ -254,6 +254,17 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 - Lens remembers the last screen across reloads (`nsestocks.lensActive`).
 - Pro Sheet (Scanners) alerts are still browser-only.
 
+### 21. Phase 4 (17-Nov-2026): accurate data, faster and clearer alerts, daily messages
+- **Stale Yahoo bars fixed**: on 17-Nov, 92 of 259 stocks ended on Fri 13-Nov (Yahoo late). `fetch_data.fill_missing_sessions` now appends the missing completed sessions from NSE `sec_bhavdata_full` before indicators are built; `meta.filledFromNse` lists them; health check "All stocks on the latest session".
+- **Daily NSE comparison**: `data-pipeline/reconcile.py` (workflow step after fetch) compares close/open/high/low (0.05%) and volume (1%) with NSE `sec_bhavdata_full` for `lastTradingDate` -> `meta.recon` (`ok` / `mismatch` / `pending`).
+- **Scanner**: scans Mon-Fri 09:15-15:35 IST (no pre-open); skips a day with no 5-min bars (NSE holiday, baseline kept); holds back an alert when Upstox and a fresh (<3 min) Yahoo price differ by more than 1% (re-checked next scan, owner warned once).
+- **Alert text** (server-built): `📡 screen`, the screen's query, `• SYMBOL ₹price (+x.xx%)`, `🕒 HH:MM IST`. Browser alerts send price/change too.
+- **Daily messages** via `/api/lens?daily=open|close|health` (CRON_SECRET): 09:20 running/holiday + watched screens, 15:45 day summary (counts from `alert:count:<day>`), 20:45 data-health report to `TELEGRAM_OWNER_CHAT_ID` (falls back to `TELEGRAM_CHAT_ID`). Owner warnings once a day: Upstox down (Yahoo backup), Upstox token expiry within 30 days (JWT `exp`).
+- **Header Alerts panel** (`AlertsPanel.jsx`, `alertPrefs.js`): one bell in the header; popup with the browser switches (Pro Sheet signals, Lens screens) and the Telegram watch list. Per-page Alerts buttons removed. Popup is portalled to `body` (the desktop header's backdrop-filter clips fixed children).
+- **Shared OI cache**: `/api/oi` snapshot + refresh lock in Redis (`oi:snap`, `oi:lock`), one ~410-call Upstox refresh per 5 min for the whole deployment; chain popup serves its last chain on a rate limit.
+- **Functions**: 10 of Vercel Hobby's 12 (`/api/stock?kind=candles|chain|depth` replaced three; old URLs rewritten in vercel.json). Test fails above 12.
+- cron-job.org jobs (Asia/Kolkata, header `Authorization: Bearer <CRON_SECRET>`): scan `* 9-15 * * 1-5`, open `20 9 * * 1-5`, close `45 15 * * 1-5`, health `45 20 * * 1-5`.
+
 ### 15j. Upstox live on (11-Nov-2026)
 - UPSTOX_ANALYTICS_TOKEN is set in Vercel (Production). /api/quotes source = upstox, SENSEX is now live too. Yahoo stays the automatic fallback.
 - ICICIPRULI is now ICICILIFE on NSE (same company, 438.40 close on 9-Nov). Renamed in universe.csv and lot_sizes.csv.
