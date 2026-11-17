@@ -1,21 +1,36 @@
 import { send, readJson, clientIp } from './_lib/http.js';
-import { configured, throttled, sendTelegram } from './_lib/telegram.js';
+import { bearer, verifyToken, loginRequired } from './_lib/auth.js';
+import { configured, parseAlert, allowRate, freshItems, buildText, sendTelegram } from './_lib/telegram.js';
 
-// Forwards a signal alert (new setup match, intraday BUY/SELL, or ORB break -- the same events the
-// in-page toast/browser-notification already shows) to Telegram, so it reaches the client even when
-// the site tab isn't open. The browser is the trigger (it already detects the event live); this
-// endpoint only keeps the bot token off the client and stops one visitor from spamming the chat.
+// A browser POST always carries Origin. Another site's page cannot use this endpoint;
+// ALLOWED_ORIGINS (comma list) adds hosts beyond this deployment's own, e.g. the GitHub Pages copy.
+function originAllowed(req) {
+  const origin = req.headers?.origin;
+  if (!origin) return true;
+  let host;
+  try {
+    host = new URL(origin).host;
+  } catch {
+    return false;
+  }
+  if (host === req.headers?.host) return true;
+  const extra = String(process.env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return extra.some((h) => h === host || h === origin);
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
-  if (!configured()) return send(res, 200, { ok: false, reason: 'NOT_CONFIGURED' }); // telegram not set up yet: no-op, not an error for the page
+  if (!originAllowed(req)) return send(res, 403, { error: 'FORBIDDEN_ORIGIN' });
+  if (loginRequired() && !verifyToken(bearer(req))) return send(res, 401, { error: 'UNAUTHORIZED' });
+  if (!configured()) return send(res, 200, { ok: false, reason: 'NOT_CONFIGURED' });
 
-  const ip = clientIp(req);
-  if (throttled(ip)) return send(res, 200, { ok: false, reason: 'THROTTLED' });
+  const parsed = parseAlert(await readJson(req, 4096));
+  if (parsed.error) return send(res, 400, { error: parsed.error });
+  if (!allowRate(clientIp(req))) return send(res, 429, { ok: false, reason: 'RATE_LIMITED' });
 
-  const body = await readJson(req, 2048);
-  const text = String(body?.text || '').trim();
-  if (!text) return send(res, 400, { error: 'EMPTY_TEXT' });
+  const items = freshItems(parsed.screen, parsed.items);
+  if (!items.length) return send(res, 200, { ok: true, sent: 0 });
 
-  const r = await sendTelegram(text);
-  return send(res, r.ok ? 200 : 502, r);
+  const r = await sendTelegram(buildText(parsed.screen, items));
+  return send(res, r.ok ? 200 : 502, { ...r, sent: r.ok ? items.length : 0 });
 }

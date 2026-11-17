@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Empty, Change } from './ui.jsx';
 import { price, dec, compact, int } from '../lib/fmt.js';
 import { exportTable } from '../lib/exporters.js';
-import { FIELDS, FIELD_BY_KEY, OPS, blankCondition, runQuery, queryText, PRESETS, loadSavedScreens, saveScreen, deleteScreen } from '../lib/lens.js';
+import { dispatchAlerts } from '../lib/alerts.js';
+import { FIELDS, FIELD_BY_KEY, OPS, blankCondition, runQuery, queryText, PRESETS, PRESET_GROUPS, loadSavedScreens, saveScreen, deleteScreen } from '../lib/lens.js';
 
 const OP_LABEL = { '>': '>', '<': '<', '>=': '>=', '<=': '<=', '=': '=' };
 const ALERT_KEY = 'nsestocks.lensAlerts';
@@ -85,27 +86,42 @@ export default function Lens({ rows, settings, meta, onOpen }) {
 
   const sectors = useMemo(() => [...new Set(merged.map((r) => r.sector || r.sec).filter(Boolean))].sort(), [merged]);
 
-  const filtered = useMemo(() => {
-    let list = sector ? merged.filter((r) => (r.sector || r.sec) === sector) : merged;
-    list = runQuery(list, conditions);
-    const needle = q.trim().toUpperCase();
-    if (needle) list = list.filter((r) => r.s.includes(needle) || (r.name || '').toUpperCase().includes(needle));
-    return list;
-  }, [merged, sector, conditions, q]);
+  const [presetGroup, setPresetGroup] = useState(PRESET_GROUPS[0]);
+  const presetCounts = useMemo(() => Object.fromEntries(PRESETS.map((p) => [p.name, runQuery(merged, p.conditions).length])), [merged]);
 
-  // Live alert: a stock that newly starts matching the active query/sector (same pattern as
-  // Scanners.jsx's alertEvents, scoped to this screen) -- toast + the same /api/telegram push.
+  // Alerts follow the screen (query + sector), not the search box.
+  const matched = useMemo(() => {
+    const list = sector ? merged.filter((r) => (r.sector || r.sec) === sector) : merged;
+    return runQuery(list, conditions);
+  }, [merged, sector, conditions]);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toUpperCase();
+    if (!needle) return matched;
+    return matched.filter((r) => r.s.includes(needle) || (r.name || '').toUpperCase().includes(needle));
+  }, [matched, q]);
+
+  const screenKey = `${sector}|${queryText(conditions)}`;
+  const prevKey = useRef(screenKey);
+
+  // A stock that newly matches the same screen on a data refresh / live tick. Editing the
+  // query or sector only resets the baseline: the stocks it brings in are not market events.
   useEffect(() => {
-    const next = new Set(filtered.map((r) => r.s));
+    if (!fundMap || !merged.length) {
+      matchedPrev.current = null; // data still loading: no baseline yet
+      return;
+    }
+    const next = new Set(matched.map((r) => r.s));
     const prev = matchedPrev.current;
+    const sameScreen = prevKey.current === screenKey;
     matchedPrev.current = next;
-    if (!alertsOn || !prev || !queryText(conditions)) return;
-    const added = [...next].filter((s) => !prev.has(s)).slice(0, 8);
-    if (!added.length) return;
+    prevKey.current = screenKey;
+    if (!alertsOn || !prev || !sameScreen || !queryText(conditions)) return;
     const label = screenName.trim() || 'Lens screen';
-    const text = `${label}: NEW match - ${added.join(', ')}`;
-    const stamp = Date.now();
-    setToasts((t) => [{ id: stamp, text }, ...t].slice(0, 5));
+    const added = dispatchAlerts(label, [...next].filter((s) => !prev.has(s)).map((s) => ({ s, k: 'new' })));
+    if (!added.length) return;
+    const text = `${label}: new match - ${added.map((a) => a.s).join(', ')}`;
+    setToasts((t) => [{ id: Date.now(), text }, ...t].slice(0, 5));
     try {
       if ('Notification' in window && Notification.permission === 'granted') {
         new Notification(`${settings.clientName}: ${label}`, { body: text, tag: 'nsestocks-lens' });
@@ -113,9 +129,8 @@ export default function Lens({ rows, settings, meta, onOpen }) {
     } catch {
       /* some mobile browsers only allow notifications from a service worker */
     }
-    fetch('./api/telegram', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, alertsOn]);
+  }, [matched, alertsOn]);
   useEffect(() => {
     if (!toasts.length) return undefined;
     const t = setTimeout(() => setToasts((x) => x.slice(0, -1)), 12000);
@@ -207,9 +222,18 @@ export default function Lens({ rows, settings, meta, onOpen }) {
           </button>
         </div>
 
-        <div className="lens-presets">
-          {PRESETS.map((p) => (
-            <button key={p.name} className="btn ghost sm" onClick={() => applyPreset(p)}>{p.name}</button>
+        <div className="lens-tabs" role="tablist">
+          {PRESET_GROUPS.map((g) => (
+            <button key={g} role="tab" aria-selected={presetGroup === g} className={presetGroup === g ? 'on' : ''} onClick={() => setPresetGroup(g)}>{g}</button>
+          ))}
+        </div>
+        <div className="lens-cards">
+          {PRESETS.filter((p) => p.group === presetGroup).map((p) => (
+            <button key={p.name} className={`lens-card ${screenName === p.name ? 'on' : ''}`} onClick={() => applyPreset(p)}>
+              <strong>{p.name}</strong>
+              <span className="muted small">{p.desc}</span>
+              <span className="lens-card-count">{presetCounts[p.name] ?? 0} {presetCounts[p.name] === 1 ? 'stock' : 'stocks'}</span>
+            </button>
           ))}
         </div>
 

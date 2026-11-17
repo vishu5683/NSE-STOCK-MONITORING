@@ -1,19 +1,25 @@
 name: Refresh fundamentals (Lens)
 
-# Separate from update-data-and-deploy.yml on purpose: fundamentals (P/E, P/B, debt-to-equity,
-# net profit, market cap) move slowly (quarterly results), so this runs once a day, not every
-# intraday refresh, and a failure here must never block the price/data workflow.
+# Separate from update-data-and-deploy.yml: fundamentals (P/E, P/B, debt-to-equity, net profit,
+# market cap, EPS, all-time high/low, 1-year return) move slowly, so this runs once a day and a
+# failure here never blocks the price workflow. The commit redeploys Vercel by itself.
 on:
   schedule:
-    - cron: '0 2 * * 1-5'   # 07:30 IST, well before market open
+    - cron: '0 2 * * 1-5'   # 07:30 IST, before market open
   workflow_dispatch: {}
 
 permissions:
   contents: write
+  issues: write
+
+concurrency:
+  group: fundamentals
+  cancel-in-progress: false
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +37,9 @@ jobs:
         run: python data-pipeline/fundamentals.py
 
       - name: Commit public/data/fundamentals.json
+        id: commit
         if: steps.fetch.outcome == 'success'
+        continue-on-error: true
         run: |
           git config user.name "nsestocks-bot"
           git config user.email "actions@users.noreply.github.com"
@@ -40,7 +48,36 @@ jobs:
           git commit -m "data: refresh fundamentals (Lens)"
           for i in 1 2 3; do
             git push && exit 0
+            echo "push attempt $i failed, rebasing before retry" >&2
             git fetch origin main
             git rebase -X theirs origin/main
           done
           git push
+
+      - name: Alert - open or update an issue when the refresh failed
+        if: steps.fetch.outcome == 'failure' || steps.commit.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Fundamentals refresh failed';
+            const body = `The fundamentals refresh (Lens) failed on ${new Date().toISOString()}.\n\n` +
+              `Lens keeps the previous fundamentals.json until a run succeeds.\n\n` +
+              `Run log: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const open = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', per_page: 50 });
+            const existing = open.data.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body });
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body });
+            }
+
+      - name: Close the alert issue when the refresh works again
+        if: steps.fetch.outcome == 'success' && steps.commit.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const open = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', per_page: 50 });
+            for (const i of open.data.filter((x) => x.title === 'Fundamentals refresh failed')) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: i.number, body: 'Fundamentals refresh is working again. Closing.' });
+              await github.rest.issues.update({ ...context.repo, issue_number: i.number, state: 'closed' });
+            }

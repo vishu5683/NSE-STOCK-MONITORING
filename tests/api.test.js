@@ -479,38 +479,58 @@ test('candles: Upstox intraday rows parsed oldest first', async () => {
 });
 
 const { default: telegramApi } = await import('../api/telegram.js');
+const callRaw = call;
 const telegramLib = await import('../api/_lib/telegram.js');
 
-test('/api/telegram: no-op without env vars, rejects GET/empty text, forwards to the Bot API, throttles', async () => {
+test('/api/telegram: server builds the text from known symbols, rejects free text, dedupes, rate-limits', async () => {
+  const sym = stockKeys[0][0];
+  const sym2 = stockKeys[1][0];
+  const auth0 = { authorization: `Bearer ${auth.issueToken().token}` };
+  const call = (handler, opts = {}) => callRaw(handler, { ...opts, headers: { ...auth0, ...(opts.headers || {}) } });
+  assert.equal((await callRaw(telegramApi, { method: 'POST', body: { screen: 'Lens', items: [{ s: sym, k: 'new' }] } })).status, 401, 'login on: token needed');
   delete process.env.TELEGRAM_BOT_TOKEN;
   delete process.env.TELEGRAM_CHAT_ID;
-  telegramLib.resetTelegramThrottle();
-  assert.equal((await call(telegramApi, { method: 'POST', body: { text: 'RELIANCE: bullish' } })).json.ok, false);
+  telegramLib.resetTelegramState();
+  assert.equal((await call(telegramApi, { method: 'POST', body: { screen: 'Lens', items: [{ s: sym, k: 'new' }] } })).json.ok, false);
   assert.equal((await call(telegramApi)).status, 405);
 
   process.env.TELEGRAM_BOT_TOKEN = 'bot-tok';
   process.env.TELEGRAM_CHAT_ID = '123456';
-  telegramLib.resetTelegramThrottle();
-  assert.equal((await call(telegramApi, { method: 'POST', body: { text: '' } })).status, 400);
-
   const calls = [];
   global.fetch = async (url, opts) => {
     calls.push({ url: String(url), body: JSON.parse(opts.body) });
     return { ok: true, status: 200, json: async () => ({ ok: true }) };
   };
-  telegramLib.resetTelegramThrottle();
-  const r = await call(telegramApi, { method: 'POST', body: { text: 'RELIANCE: bullish setup' }, ip: '7.7.7.1' });
+  telegramLib.resetTelegramState();
+
+  // free text, unknown symbol, unknown kind, no screen: all refused, Bot API never called
+  assert.equal((await call(telegramApi, { method: 'POST', body: { text: 'visit evil.example' } })).status, 400);
+  assert.equal((await call(telegramApi, { method: 'POST', body: { screen: 'Lens', items: [{ s: 'NOTREAL', k: 'new' }] } })).status, 400);
+  assert.equal((await call(telegramApi, { method: 'POST', body: { screen: 'Lens', items: [{ s: sym, k: 'click http://x' }] } })).status, 400);
+  assert.equal((await call(telegramApi, { method: 'POST', body: { screen: '<<>>', items: [{ s: sym, k: 'new' }] } })).status, 400);
+  assert.equal(calls.length, 0);
+
+  // another site's page is refused
+  const foreign = await call(telegramApi, { method: 'POST', headers: { origin: 'https://evil.example', host: 'nse.example' }, body: { screen: 'Lens', items: [{ s: sym, k: 'new' }] } });
+  assert.equal(foreign.status, 403);
+
+  const r = await call(telegramApi, { method: 'POST', headers: { origin: 'https://nse.example', host: 'nse.example' }, body: { screen: 'Momentum + Breakout', items: [{ s: sym, k: 'new' }, { s: sym2, k: 'buy', p: 101.256 }] }, ip: '7.7.7.1' });
   assert.equal(r.json.ok, true);
+  assert.equal(r.json.sent, 2);
   assert.match(calls[0].url, /^https:\/\/api\.telegram\.org\/botbot-tok\/sendMessage$/);
   assert.equal(calls[0].body.chat_id, '123456');
-  assert.equal(calls[0].body.text, 'RELIANCE: bullish setup');
+  assert.equal(calls[0].body.text, `Momentum + Breakout\n${sym}: new match\n${sym2}: intraday BUY at 101.26`);
 
-  const again = await call(telegramApi, { method: 'POST', body: { text: 'second' }, ip: '7.7.7.1' });
-  assert.equal(again.json.reason, 'THROTTLED');
-  assert.equal(calls.length, 1, 'throttled call must not reach the Bot API');
+  // same screen + symbol + kind again the same day (second tab, second viewer, flapping): not resent
+  const again = await call(telegramApi, { method: 'POST', body: { screen: 'Momentum + Breakout', items: [{ s: sym, k: 'new' }] }, ip: '7.7.7.2' });
+  assert.equal(again.json.sent, 0);
+  assert.equal(calls.length, 1);
 
-  const otherIp = await call(telegramApi, { method: 'POST', body: { text: 'third' }, ip: '7.7.7.2' });
-  assert.equal(otherIp.json.ok, true, 'a different visitor is not throttled by the first one');
+  // 10 calls a minute per address, then 429
+  telegramLib.resetTelegramState();
+  let last;
+  for (let i = 0; i < 11; i += 1) last = await call(telegramApi, { method: 'POST', body: { screen: `S${i}`, items: [{ s: sym, k: 'new' }] }, ip: '7.7.7.3' });
+  assert.equal(last.status, 429);
 });
 
 const { default: feedUrlApi } = await import('../api/feed-url.js');

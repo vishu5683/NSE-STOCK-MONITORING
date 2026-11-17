@@ -41,17 +41,52 @@ FIELDS = {
     "returnOnAssets": "roa",
     "heldPercentInsiders": "promoterPct",
     "netIncomeToCommon": "netProfit",
+    "trailingEps": "eps",
     "sector": "sector",
     "industry": "subSector",
 }
 
 CR = 1e7  # 1 crore
+HISTORY_CHUNK = 50
+
+
+def long_history(symbols: list[str]) -> dict:
+    """All-time high / low and 1-year return from monthly bars (split-adjusted), batched."""
+    out = {}
+    for i in range(0, len(symbols), HISTORY_CHUNK):
+        chunk = symbols[i:i + HISTORY_CHUNK]
+        tickers = [f"{s}.NS" for s in chunk]
+        try:
+            raw = yf.download(tickers, period="max", interval="1mo", group_by="ticker",
+                              auto_adjust=True, progress=False, threads=True)
+        except Exception as e:
+            print(f"history: chunk {i} failed: {e}", file=sys.stderr)
+            continue
+        for sym, t in zip(chunk, tickers):
+            try:
+                df = raw[t] if isinstance(raw.columns, pd.MultiIndex) else raw
+                df = df.dropna(subset=["Close"])
+            except Exception:
+                continue
+            if len(df) < 2:
+                continue
+            row = {"ath": round(float(df["High"].max()), 2), "atl": round(float(df["Low"].min()), 2)}
+            if len(df) >= 13:
+                row["ret1y"] = round((float(df["Close"].iloc[-1]) / float(df["Close"].iloc[-13]) - 1) * 100, 2)
+            out[sym] = row
+        time.sleep(1)
+    return out
 
 
 def one(symbol: str) -> dict | None:
-    try:
-        info = yf.Ticker(f"{symbol}.NS").get_info()
-    except Exception:
+    info = None
+    for attempt in range(3):
+        try:
+            info = yf.Ticker(f"{symbol}.NS").get_info()
+            break
+        except Exception:
+            time.sleep(2 * (attempt + 1))  # Yahoo throttles bulk .info callers; back off and retry
+    if info is None:
         return None
     if not info or not info.get("regularMarketPrice") and not info.get("currentPrice"):
         return None
@@ -96,7 +131,12 @@ def main() -> int:
 
     if ok < len(symbols) * 0.5:
         print(f"fundamentals: only {ok}/{len(symbols)} symbols loaded, keeping the previous file", file=sys.stderr)
-        return 1 if not old else 0  # a thin first run still exits 0 so it does not block the data refresh
+        return 1
+
+    hist = long_history(symbols)
+    for sym, row in hist.items():
+        stocks[sym] = {**stocks.get(sym, {}), **row}
+    print(f"history: all-time high/low and 1-year return for {len(hist)} stocks")
 
     payload = {
         "asOf": datetime.now(IST).isoformat(),

@@ -35,6 +35,7 @@ import {
 import { exportTable } from '../lib/exporters.js';
 import { DOWNLOADS_ENABLED } from '../lib/features.js';
 import { fetchChainLive } from '../lib/liveApi.js';
+import { dispatchAlerts } from '../lib/alerts.js';
 
 // Same tabs, same order as the client's Google Sheet.
 const VIEWS = [
@@ -82,9 +83,9 @@ const alertState = (r) => ({ match: r.match.tone === 'up' || r.match.tone === 'd
 function alertEvents(prev, r) {
   const now = alertState(r);
   const out = [];
-  if (now.match && now.match !== prev.match) out.push({ text: `${r.s}: ${now.match}`, tone: r.match.tone });
-  if ((now.sig === 'BUY' || now.sig === 'SELL') && now.sig !== prev.sig) out.push({ text: `${r.s}: intraday ${sigText(r.intra)} at ${price(r.ltp)}`, tone: now.sig === 'BUY' ? 'up' : 'down' });
-  if ((now.orb === 'up' || now.orb === 'down') && now.orb !== prev.orb && prev.orb === 'inside') out.push({ text: `${r.s}: ${orbStatus(r).label}`, tone: now.orb });
+  if (now.match && now.match !== prev.match) out.push({ s: r.s, k: r.match.tone === 'up' ? 'bull' : 'bear', text: `${r.s}: ${now.match}`, tone: r.match.tone });
+  if ((now.sig === 'BUY' || now.sig === 'SELL') && now.sig !== prev.sig) out.push({ s: r.s, k: now.sig === 'BUY' ? 'buy' : 'sell', p: r.ltp, text: `${r.s}: intraday ${sigText(r.intra)} at ${price(r.ltp)}`, tone: now.sig === 'BUY' ? 'up' : 'down' });
+  if ((now.orb === 'up' || now.orb === 'down') && now.orb !== prev.orb && prev.orb === 'inside') out.push({ s: r.s, k: now.orb === 'up' ? 'orb_up' : 'orb_down', text: `${r.s}: ${orbStatus(r).label}`, tone: now.orb });
   return out;
 }
 const has = (x) => typeof x === 'number' && Number.isFinite(x);
@@ -344,7 +345,7 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
     const prev = lastState.current;
     lastState.current = next;
     if (!alertsOn || !prev) return;
-    const events = enriched.flatMap((r) => (prev.has(r.s) ? alertEvents(prev.get(r.s), r) : [])).slice(0, 6);
+    const events = dispatchAlerts('Pro Sheet', enriched.flatMap((r) => (prev.has(r.s) ? alertEvents(prev.get(r.s), r) : [])).slice(0, 10));
     if (!events.length) return;
     const stamp = Date.now();
     setToasts((t) => [...events.map((e, i) => ({ ...e, id: `${stamp}-${i}` })), ...t].slice(0, 5));
@@ -355,9 +356,6 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
     } catch {
       /* some mobile browsers only allow notifications from a service worker */
     }
-    // Same batch to Telegram (server has the bot token; no-op there if it isn't set up, 404 on GitHub Pages).
-    const text = `${settings.clientName}\n${events.map((e) => e.text).join('\n')}`;
-    fetch('./api/telegram', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).catch(() => {});
   }, [enriched, alertsOn, settings.clientName]);
   useEffect(() => {
     if (!toasts.length) return undefined;

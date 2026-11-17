@@ -609,3 +609,17 @@ button.index-card:hover { border-color: var(--accent); }
   .lens-row .input:first-child { flex: 1 1 100%; }
   .lens-op, .lens-val { flex: 1 1 45%; }
 }
+.lens-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.lens-tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; color: var(--muted); font-weight: 600; }
+.lens-tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.lens-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.lens-card { display: flex; flex-direction: column; gap: 6px; text-align: left; background: var(--card2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; color: var(--text); }
+.lens-card:hover { border-color: var(--accent); }
+.lens-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.lens-card-count { font-size: 12px; font-weight: 700; color: var(--muted); margin-top: auto; }
+.lens, .lens > * { min-width: 0; }
+@media (max-width: 680px) {
+  .lens-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .lens-tabs button { white-space: nowrap; }
+  .lens-cards { grid-template-columns: 1fr; }
+}

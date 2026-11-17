@@ -14,6 +14,9 @@ export const OPS = {
   '=': (a, b) => Math.abs(a - b) < 1e-9,
 };
 
+const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
+const pctVs = (a, b) => (isNum(a) && isNum(b) && b > 0 ? (a / b - 1) * 100 : null);
+
 // field: { key, label, group, unit, get(row) -> number|null }
 export const FIELDS = [
   { key: 'mcap', label: 'Market Cap (in Cr)', group: 'Fundamentals', get: (r) => r.marketCap ?? null },
@@ -34,6 +37,15 @@ export const FIELDS = [
   { key: 'score', label: 'Setup Score (0-100)', group: 'Technical', get: (r) => r.score ?? null },
   { key: 'distHi', label: 'Distance from 52W High (%)', group: 'Technical', get: (r) => r.distHi ?? null },
   { key: 'distLo', label: 'Distance from 52W Low (%)', group: 'Technical', get: (r) => r.distLo ?? null },
+  { key: 'distAth', label: 'Distance from All Time High (%)', group: 'Technical', get: (r) => pctVs(r.ltp, r.ath) },
+  { key: 'distAtl', label: 'Distance from All Time Low (%)', group: 'Technical', get: (r) => pctVs(r.ltp, r.atl) },
+  { key: 'vs200', label: 'Price vs 200 EMA (%)', group: 'Technical', get: (r) => pctVs(r.ltp, r.ema200) },
+  { key: 'cross', label: '50 EMA vs 200 EMA (%)', group: 'Technical', get: (r) => pctVs(r.ema50, r.ema200) },
+  { key: 'vsVwap', label: 'Price vs VWAP (%)', group: 'Technical', get: (r) => pctVs(r.ltp, r.vwap) },
+  { key: 'vsPdh', label: 'Price vs Previous Day High (%)', group: 'Technical', get: (r) => pctVs(r.ltp, r.pdh) },
+  { key: 'volLakh', label: 'Volume (in Lakhs)', group: 'Technical', get: (r) => (isNum(r.volume) ? r.volume / 1e5 : null) },
+  { key: 'ret1y', label: '1-Year Return (%)', group: 'Price', get: (r) => r.ret1y ?? null },
+  { key: 'eps', label: 'EPS (TTM)', group: 'Fundamentals', get: (r) => r.eps ?? null },
 ];
 export const FIELD_BY_KEY = Object.fromEntries(FIELDS.map((f) => [f.key, f]));
 
@@ -59,18 +71,26 @@ export function queryText(conditions) {
   return active.map((c) => `${FIELD_BY_KEY[c.field]?.label || c.field} ${c.op} ${c.value}`).join(' AND ');
 }
 
-// A few of the reference site's "Popular Screens", using the fields above.
+const c = (field, op, value) => ({ field, op, value: String(value) });
+
+// The client's chosen screens from the reference site, grouped like its tabs.
+export const PRESET_GROUPS = ['Growth at a Discount', 'Momentum + Breakout', 'Miscellaneous'];
 export const PRESETS = [
-  { name: 'High Dividend Payout + Low P/E', conditions: [{ field: 'pe', op: '<', value: '15' }] },
-  { name: 'High Profits + Low P/B', conditions: [{ field: 'pb', op: '<', value: '3' }, { field: 'netProfit', op: '>', value: '100' }] },
-  { name: 'Low Price + High EPS', conditions: [{ field: 'ltp', op: '<', value: '200' }, { field: 'netProfit', op: '>', value: '100' }] },
-  { name: 'Momentum + Breakout', conditions: [{ field: 'chg1m', op: '>', value: '7' }, { field: 'rsi', op: '>', value: '55' }, { field: 'adx', op: '>', value: '22' }] },
-  { name: 'Pullback Stocks (Trend Continuation)', conditions: [{ field: 'rsi', op: '>', value: '45' }, { field: 'rsi', op: '<', value: '60' }, { field: 'chg1m', op: '>', value: '0' }] },
-  { name: 'High Promoter Holding + High EPS', conditions: [{ field: 'promoter', op: '>', value: '50' }, { field: 'netProfit', op: '>', value: '50' }] },
-  { name: '52W Breakout + High Return', conditions: [{ field: 'distHi', op: '>=', value: '-0.5' }, { field: 'chg1m', op: '>', value: '7' }] },
-  { name: 'Price Band Based Breakout', conditions: [{ field: 'chg', op: '>', value: '5' }] },
-  { name: 'High Return over 1M + High Volume', conditions: [{ field: 'chg1m', op: '>', value: '10' }, { field: 'volSpike', op: '>', value: '2' }] },
-  { name: 'High Volume + High Return', conditions: [{ field: 'chg', op: '>', value: '3' }, { field: 'volSpike', op: '>', value: '2' }] },
+  { group: 'Growth at a Discount', name: 'High Profits + Low P/B', desc: 'Undervalued relative to peers.', conditions: [c('pb', '<', 3), c('netProfit', '>', 1), c('promoter', '>', 50)] },
+  { group: 'Growth at a Discount', name: 'High Promoter Holding + High EPS', desc: 'Strong management + strong earnings, high conviction growth.', conditions: [c('promoter', '>', 50), c('eps', '>', 20)] },
+
+  { group: 'Momentum + Breakout', name: 'Pullback Stocks (Trend Continuation)', desc: 'Stocks in uptrend holding above VWAP.', conditions: [c('vs200', '>', 0), c('vsVwap', '>', 0), c('volLakh', '>', 15)] },
+  { group: 'Momentum + Breakout', name: '52W Breakout + High Return Over 1 Month', desc: 'Breakout confirmation with volume.', conditions: [c('distHi', '>=', -0.5), c('chg1m', '>', 10), c('volSpike', '>', 1.5)] },
+  { group: 'Momentum + Breakout', name: 'Price Band Based Breakout', desc: 'Intraday / short-term breakout above the previous day high.', conditions: [c('vsPdh', '>', 0), c('chg', '>', 2), c('volSpike', '>', 1.5)] },
+  { group: 'Momentum + Breakout', name: 'High Return Over 1 Month + High Volume', desc: 'Short-term momentum + liquidity, potential breakout or trend stocks.', conditions: [c('chg1m', '>', 10), c('volSpike', '>', 1.5)] },
+  { group: 'Momentum + Breakout', name: 'High Volume + High Return Over 1 Year', desc: 'Trending momentum + strong liquidity, potential breakout stocks.', conditions: [c('ret1y', '>', 30), c('volSpike', '>', 1.5)] },
+
+  { group: 'Miscellaneous', name: '52W Low Stocks', desc: 'Stocks at or within 0.5% of the 52-week low.', conditions: [c('distLo', '<=', 0.5)] },
+  { group: 'Miscellaneous', name: '52W High Stocks', desc: 'Stocks at or within 0.5% of the 52-week high.', conditions: [c('distHi', '>=', -0.5)] },
+  { group: 'Miscellaneous', name: 'All Time Low Stocks', desc: 'Stocks at or within 0.5% of the all-time low.', conditions: [c('distAtl', '<=', 0.5)] },
+  { group: 'Miscellaneous', name: 'All Time High Stocks', desc: 'Stocks at or within 0.5% of the all-time high.', conditions: [c('distAth', '>=', -0.5)] },
+  { group: 'Miscellaneous', name: 'Death Cross', desc: '50 EMA below 200 EMA, market cap above 1000 Cr.', conditions: [c('cross', '<', 0), c('mcap', '>', 1000)] },
+  { group: 'Miscellaneous', name: 'Golden Cross', desc: '50 EMA above 200 EMA, market cap above 1000 Cr.', conditions: [c('cross', '>', 0), c('mcap', '>', 1000)] },
 ];
 
 export const SAVE_KEY = 'nsestocks.lensScreens';
