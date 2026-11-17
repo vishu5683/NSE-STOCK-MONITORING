@@ -478,6 +478,41 @@ test('candles: Upstox intraday rows parsed oldest first', async () => {
   assert.equal(barsFromUpstox({ data: { candles: [] } }), null);
 });
 
+const { default: telegramApi } = await import('../api/telegram.js');
+const telegramLib = await import('../api/_lib/telegram.js');
+
+test('/api/telegram: no-op without env vars, rejects GET/empty text, forwards to the Bot API, throttles', async () => {
+  delete process.env.TELEGRAM_BOT_TOKEN;
+  delete process.env.TELEGRAM_CHAT_ID;
+  telegramLib.resetTelegramThrottle();
+  assert.equal((await call(telegramApi, { method: 'POST', body: { text: 'RELIANCE: bullish' } })).json.ok, false);
+  assert.equal((await call(telegramApi)).status, 405);
+
+  process.env.TELEGRAM_BOT_TOKEN = 'bot-tok';
+  process.env.TELEGRAM_CHAT_ID = '123456';
+  telegramLib.resetTelegramThrottle();
+  assert.equal((await call(telegramApi, { method: 'POST', body: { text: '' } })).status, 400);
+
+  const calls = [];
+  global.fetch = async (url, opts) => {
+    calls.push({ url: String(url), body: JSON.parse(opts.body) });
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  };
+  telegramLib.resetTelegramThrottle();
+  const r = await call(telegramApi, { method: 'POST', body: { text: 'RELIANCE: bullish setup' }, ip: '7.7.7.1' });
+  assert.equal(r.json.ok, true);
+  assert.match(calls[0].url, /^https:\/\/api\.telegram\.org\/botbot-tok\/sendMessage$/);
+  assert.equal(calls[0].body.chat_id, '123456');
+  assert.equal(calls[0].body.text, 'RELIANCE: bullish setup');
+
+  const again = await call(telegramApi, { method: 'POST', body: { text: 'second' }, ip: '7.7.7.1' });
+  assert.equal(again.json.reason, 'THROTTLED');
+  assert.equal(calls.length, 1, 'throttled call must not reach the Bot API');
+
+  const otherIp = await call(telegramApi, { method: 'POST', body: { text: 'third' }, ip: '7.7.7.2' });
+  assert.equal(otherIp.json.ok, true, 'a different visitor is not throttled by the first one');
+});
+
 const { default: feedUrlApi } = await import('../api/feed-url.js');
 
 test('/api/feed-url: one-time WebSocket URL + key map, token stays on the server', async () => {

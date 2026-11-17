@@ -355,6 +355,9 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
     } catch {
       /* some mobile browsers only allow notifications from a service worker */
     }
+    // Same batch to Telegram (server has the bot token; no-op there if it isn't set up, 404 on GitHub Pages).
+    const text = `${settings.clientName}\n${events.map((e) => e.text).join('\n')}`;
+    fetch('./api/telegram', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).catch(() => {});
   }, [enriched, alertsOn, settings.clientName]);
   useEffect(() => {
     if (!toasts.length) return undefined;
