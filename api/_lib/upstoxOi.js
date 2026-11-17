@@ -6,6 +6,7 @@
 // Expiries and futures keys come from api/_instruments.json ("fo"), which the daily workflow rebuilds.
 
 import instruments from '../_instruments.json' with { type: 'json' };
+import { redis, pipeline, redisConfigured } from './redis.js';
 
 const BASE = 'https://api.upstox.com/v2';
 const CONCURRENCY = 12;
@@ -231,13 +232,65 @@ async function refresh(token, now) {
   return { asOf: new Date().toISOString(), day: today, source: 'upstox', stocks, indices, count, futures: Object.values(stocks).filter((x) => isNum(x.futLive)).length, failed, skipped, ms: Date.now() - started, partial: failed > 0 || skipped > 0, warning: failed ? firstError?.message : undefined };
 }
 
+// A refresh costs ~410 Upstox calls. Each Vercel instance has its own memory, so with Redis the
+// snapshot and a refresh lock are shared: one refresh per CACHE_MS for the whole deployment, and the
+// per-minute Upstox budget stays free for the chain / depth popups.
+const SHARED_KEY = 'oi:snap';
+const LOCK_KEY = 'oi:lock';
+
+async function sharedGet() {
+  if (!redisConfigured()) return null;
+  try {
+    const v = await redis('GET', SHARED_KEY);
+    return v ? JSON.parse(v) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function sharedLock() {
+  if (!redisConfigured()) return true;
+  try {
+    return (await redis('SET', LOCK_KEY, '1', 'NX', 'EX', 60)) === 'OK';
+  } catch {
+    return true; // Redis down: behave like a single instance
+  }
+}
+
+async function sharedPut(entry) {
+  if (!redisConfigured()) return;
+  try {
+    await pipeline([['SET', SHARED_KEY, JSON.stringify(entry), 'EX', 3600], ['DEL', LOCK_KEY]]);
+  } catch {
+    /* the local cache still serves this instance */
+  }
+}
+
 export async function getOi(token, now = Date.now()) {
   if (!token) throw new OiError('NOT_CONFIGURED', 'UPSTOX_ANALYTICS_TOKEN is not set on the server.');
   if (cache && now - cache.at < CACHE_MS) return cache.payload;
+  const shared = await sharedGet();
+  if (shared && now - shared.at < CACHE_MS) {
+    cache = shared;
+    return shared.payload;
+  }
+  if (!inflight && !(await sharedLock())) {
+    // another instance is refreshing right now: serve the previous snapshot instead of a second burst
+    if (shared && now - shared.at < STALE_OK_MS) return { ...shared.payload, stale: true };
+    for (let i = 0; i < 8; i += 1) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const s = await sharedGet();
+      if (s && Date.now() - s.at < CACHE_MS) {
+        cache = s;
+        return s.payload;
+      }
+    }
+  }
   if (!inflight) {
     inflight = refresh(token, now)
-      .then((payload) => {
+      .then(async (payload) => {
         cache = { at: Date.now(), payload };
+        await sharedPut(cache);
         return payload;
       })
       .finally(() => {
@@ -288,7 +341,14 @@ export async function getChain(name, token, now = Date.now()) {
   if (!token) throw new OiError('NOT_CONFIGURED', 'UPSTOX_ANALYTICS_TOKEN is not set on the server.');
   const hit = chainCache.get(name);
   if (hit && now - hit.at < CHAIN_CACHE_MS) return hit.payload;
-  const c = await optionChain(name, istToday(now), token);
+  let c;
+  try {
+    c = await optionChain(name, istToday(now), token);
+  } catch (err) {
+    // Upstox per-minute limit: an older chain beats an error in the popup
+    if (err.code === 'UPSTOX_RATE_LIMIT' && hit && now - hit.at < STALE_OK_MS) return { ...hit.payload, stale: true };
+    throw err;
+  }
   if (!c || !c.rows.length || !isNum(c.spot)) throw new OiError('NO_DATA', 'No option chain for this symbol right now.');
   const width = INDEX_NAMES.has(name) ? CHAIN_WIDTH * 3 : CHAIN_WIDTH;
   const atm = c.rows.reduce((b, r) => (Math.abs(r[0] - c.spot) < Math.abs(b - c.spot) ? r[0] : b), c.rows[0][0]);

@@ -570,7 +570,7 @@ function fakeUpstash() {
       case 'SADD': { const s = sets.get(key) || new Set(); const had = s.has(args[0]); s.add(args[0]); sets.set(key, s); return had ? 0 : 1; }
       case 'EXPIRE': return 1;
       case 'GET': return strings.get(key) ?? null;
-      case 'SET': strings.set(key, args[0]); return 'OK';
+      case 'SET': if (args.includes('NX') && strings.has(key)) return null; strings.set(key, args[0]); return 'OK';
       default: throw new Error(`fake upstash: ${cmd}`);
     }
   };
@@ -671,4 +671,36 @@ test('/api/stock routes candles, chain and depth by kind; unknown kind refused',
   assert.equal((await run('/api/stock?kind=depth&s=..%2Fx')).status, 400, 'reaches the depth handler');
   assert.equal((await run('/api/stock?kind=chain&s=NOTREAL')).status, 400, 'reaches the chain handler');
   assert.equal((await run('/api/stock?kind=candles&s=..%2Fsecret')).status, 400, 'reaches the candles handler');
+});
+
+test('/api/oi: a fresh snapshot in Redis is served without calling Upstox; a busy lock serves the stale one', async () => {
+  const up = fakeUpstash();
+  process.env.UPSTASH_REDIS_REST_URL = 'https://fake.upstash.io';
+  process.env.UPSTASH_REDIS_REST_TOKEN = 'redis-tok';
+  const upstoxCalls = [];
+  global.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.startsWith('https://fake.upstash.io')) return { ok: true, status: 200, json: async () => up.handle(u, JSON.parse(opts.body)) };
+    upstoxCalls.push(u);
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  try {
+    oiLib.resetOiCache();
+    up.strings.set('oi:snap', JSON.stringify({ at: Date.now(), payload: { count: 7, stocks: {}, indices: {} } }));
+    assert.equal((await oiLib.getOi('tok')).count, 7);
+    assert.equal(upstoxCalls.length, 0, 'shared snapshot, no Upstox burst');
+
+    // snapshot is old and another instance holds the lock: stale snapshot, still no burst
+    oiLib.resetOiCache();
+    up.strings.set('oi:snap', JSON.stringify({ at: Date.now() - 10 * 60_000, payload: { count: 5, stocks: {}, indices: {} } }));
+    up.strings.set('oi:lock', '1');
+    const r = await oiLib.getOi('tok');
+    assert.equal(r.count, 5);
+    assert.equal(r.stale, true);
+    assert.equal(upstoxCalls.length, 0);
+  } finally {
+    oiLib.resetOiCache();
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  }
 });
