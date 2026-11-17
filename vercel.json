@@ -44,5 +44,19 @@
       "path": "/api/cron-refresh",
       "schedule": "0 3 * * 1-5"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/candles",
+      "destination": "/api/stock?kind=candles"
+    },
+    {
+      "source": "/api/chain",
+      "destination": "/api/stock?kind=chain"
+    },
+    {
+      "source": "/api/depth",
+      "destination": "/api/stock?kind=depth"
+    }
   ]
 }

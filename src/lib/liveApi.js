@@ -121,7 +121,7 @@ export async function fetchIntraday() {
 export async function fetchCandles(symbol) {
   const token = read();
   try {
-    const { res, body } = await jsonFetch(`./api/candles?s=${encodeURIComponent(symbol)}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 10000);
+    const { res, body } = await jsonFetch(`./api/stock?kind=candles&s=${encodeURIComponent(symbol)}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 10000);
     return res.ok && Array.isArray(body?.bars) ? body : null;
   } catch {
     return null;
@@ -143,7 +143,7 @@ export async function fetchOi() {
 export async function fetchChainLive(symbol) {
   const token = read();
   try {
-    const { res, body } = await jsonFetch(`./api/chain?s=${encodeURIComponent(symbol)}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 12000);
+    const { res, body } = await jsonFetch(`./api/stock?kind=chain&s=${encodeURIComponent(symbol)}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 12000);
     return res.ok && Array.isArray(body?.rows) ? body : null;
   } catch {
     return null;
@@ -154,7 +154,7 @@ export async function fetchChainLive(symbol) {
 export async function fetchDepth(symbol) {
   const token = read();
   try {
-    const { res, body } = await jsonFetch(`./api/depth?s=${encodeURIComponent(symbol)}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 8000);
+    const { res, body } = await jsonFetch(`./api/stock?kind=depth&s=${encodeURIComponent(symbol)}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}, 8000);
     return res.ok && Array.isArray(body?.buy) ? body : null;
   } catch {
     return null;

@@ -301,7 +301,7 @@ test('intraday maps Yahoo tickers to symbols and indices, behind the same login'
 });
 
 // ---------- /api/candles ----------
-const { default: candlesApi, sessionCandles } = await import('../api/candles.js');
+const { default: candlesApi, sessionCandles } = await import('../api/_candles.js');
 
 test('candles: today only, running VWAP, unknown symbols refused', async () => {
   const day = (iso, n, base) => Array.from({ length: n }, (_, i) => ({ t: Date.parse(iso) / 1000 + i * 300, o: base, h: base + 2, l: base - 1, c: base + 1, v: i + 1 }));
@@ -348,7 +348,7 @@ test('cron refresh: only with the cron secret, dispatches the workflow once', as
 // ---------- /api/oi and /api/chain (Upstox option chain + futures) ----------
 const oiLib = await import('../api/_lib/upstoxOi.js');
 const { default: oiApi } = await import('../api/oi.js');
-const { default: chainApi } = await import('../api/chain.js');
+const { default: chainApi } = await import('../api/_chain.js');
 
 const fakeChain = (spot, strikes) =>
   strikes.map((k) => ({
@@ -425,7 +425,7 @@ test('/api/oi: option chains + futures quotes, login and token errors', async ()
   assert.equal(refused.json.error, 'UPSTOX_TOKEN_INVALID');
 });
 
-const { default: depthApi } = await import('../api/depth.js');
+const { default: depthApi } = await import('../api/_depth.js');
 
 test('/api/depth: 5 levels, totals and circuit limits; bad symbol refused', async () => {
   oiLib.resetOiCache();
@@ -470,7 +470,7 @@ test('supertrend, bollinger, stochastic and 15-minute candles', () => {
 });
 
 test('candles: Upstox intraday rows parsed oldest first', async () => {
-  const { barsFromUpstox } = await import('../api/candles.js');
+  const { barsFromUpstox } = await import('../api/_candles.js');
   const b = barsFromUpstox({ data: { candles: [['2026-11-12T09:20:00+05:30', 101, 103, 100, 102, 50, 0], ['2026-11-12T09:15:00+05:30', 100, 102, 99, 101, 40, 0]] } });
   assert.equal(b.length, 2);
   assert.equal(b[0].o, 100);
@@ -657,4 +657,18 @@ test('Vercel Hobby limit: at most 12 serverless functions in api/', async () => 
   const { readdirSync } = await import('node:fs');
   const fns = readdirSync(new URL('../api/', import.meta.url)).filter((f) => f.endsWith('.js') && !f.startsWith('_'));
   assert.ok(fns.length <= 12, `${fns.length} functions: ${fns.join(', ')} -- a 13th makes the whole deployment fail`);
+});
+
+test('/api/stock routes candles, chain and depth by kind; unknown kind refused', async () => {
+  const { default: stockApi } = await import('../api/stock.js');
+  const { token } = auth.issueToken();
+  const run = (url) => new Promise((resolve) => {
+    const res = { statusCode: 200, setHeader() {}, end(t) { resolve({ status: this.statusCode, json: JSON.parse(t) }); } };
+    stockApi({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } }, res);
+  });
+  assert.equal((await run('/api/stock?kind=nope&s=RELIANCE')).json.error, 'BAD_KIND');
+  assert.equal((await run('/api/stock?s=RELIANCE')).status, 400);
+  assert.equal((await run('/api/stock?kind=depth&s=..%2Fx')).status, 400, 'reaches the depth handler');
+  assert.equal((await run('/api/stock?kind=chain&s=NOTREAL')).status, 400, 'reaches the chain handler');
+  assert.equal((await run('/api/stock?kind=candles&s=..%2Fsecret')).status, 400, 'reaches the candles handler');
 });
