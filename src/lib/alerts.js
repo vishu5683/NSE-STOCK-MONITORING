@@ -24,6 +24,20 @@ function writeSent(day, keys) {
   }
 }
 
+// Server-side watch list (alerts with no browser open). null when the backend is not reachable.
+async function watchCall(init) {
+  try {
+    const res = await fetch('./api/watch', { ...init, headers: { 'Content-Type': 'application/json', ...authHeader(), ...(init?.headers || {}) } });
+    const body = await res.json().catch(() => null);
+    return res.ok ? body : { error: body?.error || `HTTP ${res.status}`, message: body?.message };
+  } catch {
+    return null;
+  }
+}
+export const getWatch = () => watchCall({ method: 'GET' });
+export const watchScreen = (sc) => watchCall({ method: 'POST', body: JSON.stringify({ action: 'add', ...sc }) });
+export const unwatchScreen = (name) => watchCall({ method: 'POST', body: JSON.stringify({ action: 'remove', name }) });
+
 // items: [{ s, k, p?, text, tone }] -> the ones not yet sent today (also posted to Telegram)
 export function dispatchAlerts(screen, items, now = Date.now()) {
   const day = istDay(now);

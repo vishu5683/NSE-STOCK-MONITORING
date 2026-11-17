@@ -14,26 +14,31 @@ export function resetSourceState() {
   lastUpstoxProblem = '';
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'GET') return send(res, 405, { error: 'METHOD', message: 'Use GET.' }, { Allow: 'GET' });
-  if (loginRequired() && !verifyToken(bearer(req))) return send(res, 401, { error: 'UNAUTHORIZED', message: 'Sign in again.' });
-
+// Upstox first, Yahoo as fallback; throws when neither answers. Also used by the server-side scanner.
+export async function liveQuotes() {
   const token = process.env.UPSTOX_ANALYTICS_TOKEN;
   if (token && Date.now() >= upstoxBlockedUntil) {
     try {
-      const payload = await getQuotes(token);
-      return send(res, 200, { ...payload, source: 'upstox' });
+      return { ...(await getQuotes(token)), source: 'upstox' };
     } catch (err) {
       const e = err instanceof UpstoxError ? err : new UpstoxError('UPSTOX_ERROR', 'Live prices are unavailable.');
       lastUpstoxProblem = e.message;
       if (e.code === 'UPSTOX_TOKEN_INVALID') upstoxBlockedUntil = Date.now() + SKIP_UPSTOX_MS;
     }
   }
-
   try {
-    const payload = await getYahooQuotes();
-    return send(res, 200, { ...payload, fallbackReason: token ? lastUpstoxProblem : 'Upstox token is not set.' });
+    return { ...(await getYahooQuotes()), fallbackReason: token ? lastUpstoxProblem : 'Upstox token is not set.' };
   } catch (err) {
-    return send(res, 502, { error: 'NO_SOURCE', message: `No price source is available. ${lastUpstoxProblem} ${err.message}`.trim() });
+    throw new Error(`No price source is available. ${lastUpstoxProblem} ${err.message}`.trim());
+  }
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'GET') return send(res, 405, { error: 'METHOD', message: 'Use GET.' }, { Allow: 'GET' });
+  if (loginRequired() && !verifyToken(bearer(req))) return send(res, 401, { error: 'UNAUTHORIZED', message: 'Sign in again.' });
+  try {
+    return send(res, 200, await liveQuotes());
+  } catch (err) {
+    return send(res, 502, { error: 'NO_SOURCE', message: err.message });
   }
 }

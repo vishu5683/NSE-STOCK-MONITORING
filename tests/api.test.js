@@ -551,3 +551,104 @@ test('/api/feed-url: one-time WebSocket URL + key map, token stays on the server
   assert.ok(!JSON.stringify(ok.json).includes(process.env.UPSTOX_ANALYTICS_TOKEN), 'token never sent to the browser');
   assert.equal((await call(feedUrlApi)).status, 401);
 });
+
+// ---------- server-side Lens alerts: /api/watch + /api/scan with an in-memory fake of Upstash ----------
+const scanLib = await import('../api/_lib/scan.js');
+const { default: scanApi } = await import('../api/scan.js');
+const { default: watchApi } = await import('../api/watch.js');
+
+function fakeUpstash() {
+  const hashes = new Map();
+  const sets = new Map();
+  const strings = new Map();
+  const run = ([cmd, key, ...args]) => {
+    switch (cmd) {
+      case 'HGETALL': return [...(hashes.get(key) || new Map())].flat();
+      case 'HSET': { const h = hashes.get(key) || new Map(); for (let i = 0; i < args.length; i += 2) h.set(args[i], args[i + 1]); hashes.set(key, h); return args.length / 2; }
+      case 'HDEL': { const h = hashes.get(key); return h && h.delete(args[0]) ? 1 : 0; }
+      case 'DEL': return [hashes.delete(key), sets.delete(key), strings.delete(key)].some(Boolean) ? 1 : 0;
+      case 'SADD': { const s = sets.get(key) || new Set(); const had = s.has(args[0]); s.add(args[0]); sets.set(key, s); return had ? 0 : 1; }
+      case 'EXPIRE': return 1;
+      case 'GET': return strings.get(key) ?? null;
+      case 'SET': strings.set(key, args[0]); return 'OK';
+      default: throw new Error(`fake upstash: ${cmd}`);
+    }
+  };
+  return { hashes, sets, strings, handle: (url, body) => (url.endsWith('/pipeline') ? body.map((c) => ({ result: run(c) })) : { result: run(body) }) };
+}
+
+test('watch + scan: baseline, new match alert, no repeat, edited screen re-baselines', async () => {
+  const sym = stockKeys[0][0];
+  process.env.UPSTASH_REDIS_REST_URL = 'https://fake.upstash.io';
+  process.env.UPSTASH_REDIS_REST_TOKEN = 'redis-tok';
+  process.env.CRON_SECRET = 'cron-secret-123';
+  process.env.TELEGRAM_BOT_TOKEN = 'bot-tok';
+  process.env.TELEGRAM_CHAT_ID = '123456';
+  delete process.env.UPSTOX_ANALYTICS_TOKEN;
+  telegramLib.resetTelegramState();
+  intradayLib.resetIntradayCache();
+  yahoo.resetYahooCache();
+  sources.resetSourceState();
+
+  const up = fakeUpstash();
+  let ltp = 200;
+  const telegrams = [];
+  global.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.startsWith('https://fake.upstash.io')) return { ok: true, status: 200, json: async () => up.handle(u, JSON.parse(opts.body)) };
+    if (u.includes('api.telegram.org')) { telegrams.push(JSON.parse(opts.body).text); return { ok: true, status: 200, json: async () => ({ ok: true }) }; }
+    if (u === 'https://nse.example/data/latest.json') return { ok: true, status: 200, json: async () => ({ stocks: [{ s: sym, sec: 'Test', ltp, prevClose: 190 }], indices: [] }) };
+    if (u === 'https://nse.example/config.json') return { ok: true, status: 200, json: async () => ({ screener: {} }) };
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  const auth0 = { authorization: `Bearer ${auth.issueToken().token}` };
+  const run = (handler, { method = 'GET', url = '/', headers = {}, body } = {}) => new Promise((resolve) => {
+    const res = { statusCode: 200, setHeader() {}, end(t) { resolve({ status: this.statusCode, json: JSON.parse(t) }); } };
+    Promise.resolve(handler({ method, url, headers: { host: 'nse.example', 'x-forwarded-for': '8.8.8.8', ...headers }, body }, res));
+  });
+  const scan = () => run(scanApi, { url: '/api/scan?force=1', headers: { authorization: 'Bearer cron-secret-123' } });
+
+  assert.equal((await run(scanApi, { url: '/api/scan?force=1' })).status, 401, 'scanner needs the cron secret');
+  const bad = await run(watchApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'nope', op: '<', value: '1' }] } });
+  assert.equal(bad.status, 400);
+  const add = await run(watchApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '150' }] } });
+  assert.equal(add.status, 200);
+  assert.equal(add.json.screens[0].name, 'Cheap');
+
+  const s1 = await scan();
+  assert.equal(s1.status, 200);
+  assert.equal(s1.json.alerts, 0, 'first scan only sets the baseline');
+  ltp = 100;
+  const s2 = await scan();
+  assert.equal(s2.json.sent, 1);
+  assert.equal(telegrams.at(-1), `Cheap\n${sym}: new match`);
+  const s3 = await scan();
+  assert.equal(s3.json.sent, 0, 'still matching: no repeat');
+
+  // leaves and comes back the same day: the shared Redis dedupe holds it back
+  ltp = 200; await scan(); ltp = 100;
+  assert.equal((await scan()).json.sent, 0);
+
+  // editing the watched screen re-baselines instead of alerting
+  await run(watchApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '120' }] } });
+  assert.equal((await scan()).json.alerts, 0);
+
+  const list = await run(watchApi, { headers: auth0 });
+  assert.equal(list.json.configured, true);
+  assert.ok(list.json.lastScan?.at);
+  const rm = await run(watchApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Cheap' } });
+  assert.equal(rm.json.screens.length, 0);
+  assert.equal(telegrams.length, 1);
+
+  delete process.env.UPSTASH_REDIS_REST_URL;
+  delete process.env.UPSTASH_REDIS_REST_TOKEN;
+});
+
+test('scan helpers: screen validation and market window', () => {
+  assert.equal(scanLib.parseScreen({ name: 'X', conditions: [] }).error, 'BAD_CONDITION');
+  assert.equal(scanLib.parseScreen({ name: '', conditions: [{ field: 'ltp', op: '<', value: '1' }] }).error, 'BAD_NAME');
+  assert.deepEqual(scanLib.parseScreen({ name: 'X', conditions: [{ field: 'ltp', op: '<', value: '1' }, { field: 'rsi', op: '>', value: '' }] }).conditions, [{ field: 'ltp', op: '<', value: '1' }]);
+  assert.equal(scanLib.marketWindow(Date.parse('2026-11-18T05:00:00Z')), true); // Wed 10:30 IST
+  assert.equal(scanLib.marketWindow(Date.parse('2026-11-18T12:00:00Z')), false); // Wed 17:30 IST
+  assert.equal(scanLib.marketWindow(Date.parse('2026-11-21T05:00:00Z')), false); // Sat
+});

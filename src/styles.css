@@ -623,3 +623,5 @@ button.index-card:hover { border-color: var(--accent); }
   .lens-tabs button { white-space: nowrap; }
   .lens-cards { grid-template-columns: 1fr; }
 }
+.lens-head-tools { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.lens-watched { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -2px 0 10px; }

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Empty, Change } from './ui.jsx';
 import { price, dec, compact, int } from '../lib/fmt.js';
 import { exportTable } from '../lib/exporters.js';
-import { dispatchAlerts } from '../lib/alerts.js';
+import { dispatchAlerts, getWatch, watchScreen, unwatchScreen } from '../lib/alerts.js';
 import { FIELDS, FIELD_BY_KEY, OPS, blankCondition, runQuery, queryText, PRESETS, PRESET_GROUPS, loadSavedScreens, saveScreen, deleteScreen } from '../lib/lens.js';
 
 const OP_LABEL = { '>': '>', '<': '<', '>=': '>=', '<=': '<=', '=': '=' };
@@ -51,11 +51,39 @@ function ConditionRow({ c, onChange, onRemove, canRemove }) {
   );
 }
 
+const ACTIVE_KEY = 'nsestocks.lensActive';
+const readActive = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(ACTIVE_KEY) || 'null');
+    return v && Array.isArray(v.conditions) && v.conditions.length ? v : null;
+  } catch {
+    return null;
+  }
+};
+
 export default function Lens({ rows, settings, meta, onOpen }) {
-  const [conditions, setConditions] = useState([blankCondition()]);
-  const [sector, setSector] = useState('');
+  const [conditions, setConditions] = useState(() => readActive()?.conditions || [blankCondition()]);
+  const [sector, setSector] = useState(() => readActive()?.sector || '');
   const [q, setQ] = useState('');
-  const [screenName, setScreenName] = useState('');
+  const [screenName, setScreenName] = useState(() => readActive()?.name || '');
+  const [watch, setWatch] = useState(null); // { configured, screens, lastScan } from the server
+  const [watchBusy, setWatchBusy] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_KEY, JSON.stringify({ name: screenName, sector, conditions }));
+    } catch {
+      /* not remembered across reloads */
+    }
+  }, [screenName, sector, conditions]);
+
+  useEffect(() => {
+    let dead = false;
+    getWatch().then((w) => !dead && setWatch(w));
+    return () => {
+      dead = true;
+    };
+  }, []);
   const [saved, setSaved] = useState(() => loadSavedScreens());
   const [alertsOn, setAlertsOn] = useState(() => readFlag(ALERT_KEY));
   const [toasts, setToasts] = useState([]);
@@ -137,6 +165,27 @@ export default function Lens({ rows, settings, meta, onOpen }) {
     return () => clearTimeout(t);
   }, [toasts]);
 
+  const watchedSc = watch?.screens?.find((s) => s.name === screenName.trim());
+  const watched = Boolean(watchedSc);
+  const watchDirty = Boolean(watchedSc && `${watchedSc.sector || ''}|${queryText(watchedSc.conditions)}` !== `${sector}|${queryText(conditions)}`);
+  const canWatch = Boolean(screenName.trim() && queryText(conditions));
+  const applyWatchResult = (r) => {
+    if (r?.screens) setWatch((w) => ({ ...(w || {}), configured: true, screens: r.screens }));
+    else setToasts((t) => [{ id: Date.now(), text: r?.message || r?.error || 'Server alerts are unavailable.' }, ...t].slice(0, 5));
+  };
+  const toggleWatch = async () => {
+    if (!canWatch) return;
+    setWatchBusy(true);
+    const name = screenName.trim();
+    applyWatchResult(watched && !watchDirty ? await unwatchScreen(name) : await watchScreen({ name, sector, conditions }));
+    setWatchBusy(false);
+  };
+  const removeWatched = async (name) => {
+    setWatchBusy(true);
+    applyWatchResult(await unwatchScreen(name));
+    setWatchBusy(false);
+  };
+
   const toggleAlerts = async () => {
     const on = !alertsOn;
     if (on && 'Notification' in window && Notification.permission === 'default') {
@@ -217,10 +266,35 @@ export default function Lens({ rows, settings, meta, onOpen }) {
       <Card>
         <div className="lens-head">
           <h2>Lens <span className="tag muted">Beta</span></h2>
-          <button className={`btn sm ${alertsOn ? 'primary' : 'ghost'}`} onClick={toggleAlerts} aria-pressed={alertsOn} title="Toast + Telegram when a stock newly matches this screen">
-            {alertsOn ? '🔔' : '🔕'} {alertsOn ? ' Alerts on' : ' Alerts off'}
-          </button>
+          <div className="lens-head-tools">
+            {watch?.configured && (
+              <button
+                className={`btn sm ${watched ? 'primary' : 'ghost'}`}
+                onClick={toggleWatch}
+                disabled={watchBusy || !canWatch}
+                aria-pressed={watched}
+                title={canWatch ? 'Telegram alert from the server when a stock newly matches this screen, even with no browser open' : 'Pick or name a screen with at least one condition'}
+              >
+                {watchDirty ? '📡 Update watch' : watched ? '📡 Watching' : '📡 Watch'}
+              </button>
+            )}
+            <button className={`btn sm ${alertsOn ? 'primary' : 'ghost'}`} onClick={toggleAlerts} aria-pressed={alertsOn} title="Toast + Telegram while this page is open">
+              {alertsOn ? '🔔' : '🔕'} {alertsOn ? ' Alerts on' : ' Alerts off'}
+            </button>
+          </div>
         </div>
+        {watch?.configured && watch.screens?.length > 0 && (
+          <div className="lens-watched">
+            <span className="muted small">Server alerts (browser can be closed):</span>
+            {watch.screens.map((s) => (
+              <span key={s.name} className="lens-saved-chip">
+                <button className="btn ghost sm" onClick={() => { setConditions(s.conditions.map((x) => ({ ...x }))); setSector(s.sector || ''); setScreenName(s.name); }}>📡 {s.name}</button>
+                <button className="btn ghost sm" aria-label={`Stop watching ${s.name}`} onClick={() => removeWatched(s.name)} disabled={watchBusy}>✕</button>
+              </span>
+            ))}
+            {watch.lastScan?.at && <span className="muted small">Last scan {new Date(watch.lastScan.at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })} IST</span>}
+          </div>
+        )}
 
         <div className="lens-tabs" role="tablist">
           {PRESET_GROUPS.map((g) => (

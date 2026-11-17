@@ -8,6 +8,7 @@
 // URL cannot post arbitrary text (links, phishing) to the client's chat.
 
 import instruments from '../_instruments.json' with { type: 'json' };
+import { redisConfigured, pipeline } from './redis.js';
 
 const SYMBOLS = new Set(Object.keys(instruments.stocks || {}));
 const KINDS = {
@@ -71,9 +72,16 @@ export function allowRate(ip, now = Date.now()) {
   return true;
 }
 
-// Drops items already sent today (same screen + symbol + kind), so a stock that flaps around a
-// threshold, or a second open tab / second viewer on the same warm instance, does not repeat it.
-export function freshItems(screen, items, now = Date.now()) {
+// Drops items already sent today (same screen + symbol + kind). With Redis the list is shared by
+// every viewer, every function instance and the server-side scanner; without it, per warm instance.
+export async function freshItems(screen, items, now = Date.now()) {
+  if (!redisConfigured()) return freshItemsLocal(screen, items, now);
+  const key = `alert:sent:${istDay(now)}`;
+  const added = await pipeline([...items.map((it) => ['SADD', key, `${screen}|${it.s}|${it.k}`]), ['EXPIRE', key, 172800]]);
+  return items.filter((_, i) => added[i] === 1);
+}
+
+export function freshItemsLocal(screen, items, now = Date.now()) {
   const day = istDay(now);
   if (day !== sentDay) {
     sentDay = day;
@@ -85,6 +93,19 @@ export function freshItems(screen, items, now = Date.now()) {
     sentKeys.add(key);
     return true;
   });
+}
+
+// Dedupe, then send in messages of at most 10 lines. Returns how many items went out.
+export async function deliver(screen, items) {
+  const fresh = await freshItems(screen, items);
+  let sent = 0;
+  for (let i = 0; i < fresh.length; i += MAX_ITEMS) {
+    const part = fresh.slice(i, i + MAX_ITEMS);
+    const r = await sendTelegram(buildText(screen, part));
+    if (!r.ok) return { ok: false, reason: r.reason, sent };
+    sent += part.length;
+  }
+  return { ok: true, sent };
 }
 
 export function buildText(screen, items) {

@@ -245,6 +245,15 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 - Table, query rows and presets reuse the existing CSS tokens/classes (`.input`, `.btn`, `.table-wrap.sheet-wrap`, `.grid-tools`, `.alert-toasts`) rather than inventing new chrome; new rules are only the `.lens-*` ones for the condition-builder row layout.
 - Tests: 55/55 (`lens.test.js` added), `npm run build` clean. Not yet checked against a live, populated `fundamentals.json` (first daily run hasn't fired yet) or on a real phone.
 
+### 20. Server-side Lens alerts (18-Nov-2026) -- alerts with no browser open
+- Lens "📡 Watch" adds the current screen (name + sector + conditions) to Upstash Redis (`/api/watch`, max 20). Watched screens show as chips; "Update watch" when the screen was edited.
+- cron-job.org calls `GET /api/scan` every 2 min with `Authorization: Bearer <CRON_SECRET>` (same secret as Vercel Cron's `/api/cron-refresh`). It runs only Mon-Fri 09:00-16:00 IST (`?force=1` overrides).
+- `/api/scan` builds the same rows as the browser by importing `src/lib/live.js`, `signals.js`, `lens.js` (data from `/data/latest.json`, `/data/fundamentals.json`, `/config.json` of this deployment + `liveQuotes()` (Upstox, Yahoo fallback) + `getIntraday()`), diffs each watched screen against `lens:last`, sends new matches via `deliver()`.
+- First scan of a new or edited screen only sets the baseline. Dedupe `alert:sent:<IST day>` is a Redis set shared by browser `/api/telegram`, every function instance and the scanner, so no repeats across viewers either.
+- Env (Vercel): `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (+ existing `CRON_SECRET`, `TELEGRAM_*`). Without Upstash, Watch is hidden and `/api/scan` answers 503.
+- Lens remembers the last screen across reloads (`nsestocks.lensActive`).
+- Pro Sheet (Scanners) alerts are still browser-only.
+
 ### 15j. Upstox live on (11-Nov-2026)
 - UPSTOX_ANALYTICS_TOKEN is set in Vercel (Production). /api/quotes source = upstox, SENSEX is now live too. Yahoo stays the automatic fallback.
 - ICICIPRULI is now ICICILIFE on NSE (same company, 438.40 close on 9-Nov). Renamed in universe.csv and lot_sizes.csv.
