@@ -139,15 +139,25 @@ def download(symbols: list[str]) -> dict[str, pd.DataFrame]:
     return frames
 
 
-def fill_missing_sessions(frames: dict[str, pd.DataFrame], tickers: list[str]) -> list[str]:
+def fill_missing_sessions(frames: dict[str, pd.DataFrame], tickers: list[str], today: date | None = None) -> list[str]:
     """Yahoo is sometimes a session late for some stocks (17-Nov-2026: 92 of 259 still ended on the
-    previous Friday). A stock whose candles stop before sessions the other stocks already have gets
-    those sessions from NSE's official end-of-day file, so its close and indicators are current.
-    Returns the symbols that were filled."""
+    previous Friday) and sometimes for every stock (18-Nov-2026 04:00 IST: all 259 ended on 16-Nov).
+    A stock whose candles stop before a session that other stocks have, or that NSE has already
+    published an end-of-day file for, gets that session from the NSE file, so its close and
+    indicators are current. Returns the symbols that were filled."""
     from reconcile import nse_bhav
 
     sessions = sorted({d.date() for t in tickers if t in frames for d in frames[t].index[-5:]})
     bhav_cache: dict = {}
+    # weekdays after Yahoo's newest session: an NSE file there means Yahoo is late for everyone
+    if sessions and today:
+        d = sessions[-1] + timedelta(days=1)
+        while d <= today:
+            if d.weekday() < 5:
+                bhav_cache[d] = nse_bhav(d)
+                if bhav_cache[d]:
+                    sessions.append(d)
+            d += timedelta(days=1)
     filled = []
     for t in tickers:
         df = frames.get(t)
@@ -286,7 +296,7 @@ def main() -> int:
     print(f"Downloading {len(uni)} stocks + {len(INDICES)} indices ...")
     frames = download([yahoo_symbol(s) for s in uni["symbol"]] + [i[1] for i in INDICES])
     try:
-        filled = fill_missing_sessions(frames, [yahoo_symbol(s) for s in uni["symbol"]])
+        filled = fill_missing_sessions(frames, [yahoo_symbol(s) for s in uni["symbol"]], now.date())
     except Exception as exc:  # NSE archive unreachable: publish what Yahoo has, the evening check reports it
         print(f"  fill from NSE skipped: {exc}")
         filled = []
