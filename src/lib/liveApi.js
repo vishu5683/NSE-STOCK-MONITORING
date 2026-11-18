@@ -105,7 +105,7 @@ export async function fetchLive() {
   }
 }
 
-// Live 5-minute indicators (EMA 9/15, RSI, MACD) for all stocks. Returns the payload or null.
+// Live 5-minute indicators (EMA 9/15/21/50, RSI, MACD, ADX, F&O derivatives inputs) for all stocks. Returns the payload or null.
 export async function fetchIntraday() {
   const token = read();
   try {

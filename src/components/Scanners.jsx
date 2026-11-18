@@ -31,6 +31,11 @@ import {
   bbLabel,
   stochLabel,
   trend15Label,
+  slowEma,
+  slowLen,
+  emaPairLabel,
+  fnoSignal,
+  FNO_DEFAULTS,
 } from '../lib/intraday.js';
 import { exportTable } from '../lib/exporters.js';
 import { DOWNLOADS_ENABLED } from '../lib/features.js';
@@ -44,13 +49,14 @@ const VIEWS = [
   { id: 'summary', label: 'Dashboard', icon: '📊', desc: 'Market summary and every stock that matches all your settings.' },
   { id: 'active', label: 'Most Active', icon: '🔥', desc: 'Highest turnover stocks today with volume spike, delivery and signal.' },
   { id: 'index', label: 'Index Options', icon: '🧭', desc: 'NIFTY, BANK NIFTY and SENSEX: VWAP, PCR, max pain and the CE / PE bias.' },
+  { id: 'deriv', label: 'F&O Derivatives', icon: '📐', desc: '5-minute EMA 9 / 21 cross with the EMA 50 trend, ADX, SMC demand / supply zone and volume spike.' },
   { id: 'fno', label: 'F&O Screener', icon: '🧮', desc: 'Every F&O stock with futures OI, PCR, IV, MWPL and delivery.' },
   { id: 'chain', label: 'Option Chain', icon: '⛓️', desc: 'PCR, OI support and resistance, writing and max pain. Tap a stock for the strike chain.' },
   { id: 'futures', label: 'Futures Data', icon: '📈', desc: 'Futures price, basis, OI change and long / short build-up.' },
   { id: 'breakout', label: 'Breakout', icon: '🚀', desc: 'Stocks at or near their 52-week high or low with volume.' },
   { id: 'swing', label: 'Swing', icon: '🌊', desc: 'EMA 20 / 50 / 200 trend, momentum and swing trade levels.' },
   { id: 'heatmap', label: 'Sector Heatmap', icon: '🗺️', desc: 'Every stock by sector for today, a week and a month.' },
-  { id: 'intraday', label: 'Intraday', icon: '⚡', desc: 'Live VWAP, EMA 9 / 15, RSI, MACD and CPR with BUY / SELL / WAIT.' },
+  { id: 'intraday', label: 'Intraday', icon: '⚡', desc: 'Live VWAP, EMA 9 / 21, RSI, MACD and CPR with BUY / SELL / WAIT.' },
   { id: 'patterns', label: 'Patterns & ORB', icon: '🎯', desc: 'Gap, opening range breakout, previous day range, NR7 and inside bars.' },
   { id: 'fii', label: 'FII / DII', icon: '🏦', desc: 'How FIIs, DIIs, pros and clients are positioned in futures and options.' },
 ];
@@ -303,6 +309,7 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
   const [toasts, setToasts] = useState([]);
   const lastState = useRef(null);
   const c = settings.screener;
+  const f = useMemo(() => ({ ...FNO_DEFAULTS, ...(settings.fno || {}) }), [settings.fno]);
   const ctx = { meta, settings };
 
   const tabsRef = useRef(null);
@@ -330,9 +337,9 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
     const turnRank = new Map(byTurnover.map((s, i) => [s, i + 1]));
     return rows.map((r) => {
       const intra = intradaySignal(r, c);
-      return { ...r, intra, match: settingsMatch(r, intra), brk: breakoutSignal(r, c), swing: swingSignal(r, c), atm: atmFor(r), turnRank: turnRank.get(r.s) };
+      return { ...r, intra, match: settingsMatch(r, intra), brk: breakoutSignal(r, c), swing: swingSignal(r, c), atm: atmFor(r), turnRank: turnRank.get(r.s), emaSl: slowEma(r, c), emaN: slowLen(r, c), deriv: fnoSignal(r, c, f) };
     });
-  }, [rows, c]);
+  }, [rows, c, f]);
   // Alerts: compare each refresh / live tick with the previous one
   useEffect(() => {
     const next = new Map(enriched.map((r) => [r.s, alertState(r)]));
@@ -650,10 +657,10 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
               LTP,
               { label: 'VWAP', x: (r) => r.vwap, cell: (r) => price(r.vwap), cls: 'num', hide: 'sm' },
               { label: 'Above VWAP', x: (r) => r.ltp / r.vwap - 1, cell: (r) => (r.ltp > r.vwap ? <span className="up-t">YES</span> : <span className="down-t">NO</span>) },
-              { label: 'EMA 9', x: (r) => r.ema9i, cell: (r) => <span className={r.ema9i > r.ema15i ? 'up-t' : 'down-t'}>{price(r.ema9i)}</span>, cls: 'num', hide: 'md' },
-              { label: 'EMA 15', x: (r) => r.ema15i, cell: (r) => price(r.ema15i), cls: 'num', hide: 'md' },
+              { label: 'EMA 9', x: (r) => r.ema9i, cell: (r) => <span className={r.ema9i > r.emaSl ? 'up-t' : 'down-t'}>{price(r.ema9i)}</span>, cls: 'num', hide: 'md' },
+              { label: `EMA ${emaPairLabel(c).slice(2)}`, x: (r) => r.emaSl, cell: (r) => price(r.emaSl), cls: 'num', hide: 'md' },
               { label: 'RSI (14)', x: (r) => r.rsiI ?? r.rsi, cell: (r) => <Tag v={rsiStatus(r.rsiI ?? r.rsi)} />, hide: 'sm' },
-              { label: 'Intraday 9/15 EMA Signal', x: (r) => ({ BUY: 0, SELL: 1, WAIT: 2, 'NO-TRADE': 3 })[r.intra.signal] ?? 4, cell: (r) => <SignalCell intra={r.intra} /> },
+              { label: `Intraday ${emaPairLabel(c)} EMA Signal`, x: (r) => ({ BUY: 0, SELL: 1, WAIT: 2, 'NO-TRADE': 3 })[r.intra.signal] ?? 4, cell: (r) => <SignalCell intra={r.intra} /> },
               { label: 'MACD Status', x: (r) => macdStatus(r.macdI, r.macdIsig).label, cell: (r) => <Tag v={macdStatus(r.macdI, r.macdIsig)} />, str: true, hide: 'md' },
               { label: 'CPR', x: (r) => cprLabel(r, c), cell: (r) => cprCell(r, c), str: true, hide: 'md' },
               { label: 'Supertrend', x: (r) => r.stDir, cell: (r) => <Tag v={stLabel(r)} />, hide: 'sm', card: true },
@@ -664,6 +671,46 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
             ]}
             key="intraday"
           />
+        )}
+        {view === 'deriv' && (
+          <>
+            <p className="small muted tab-note">
+              5-minute candles. Signal = EMA 9 crossing EMA 21 in the last {f.lookback} bar{f.lookback > 1 ? 's' : ''}, price on the right side of EMA 50, ADX {f.adx}+
+              {f.smc ? ', price in an SMC demand (buy) or supply (sell) order block' : ''} and the 5-minute volume at least {f.volX}x the average 5-minute bar of the last 10 sessions. Change these in Admin.
+            </p>
+            <Grid
+              title="NSE F&O Derivatives"
+              ctx={ctx}
+              rows={shown.filter((r) => r.deriv && (!f.onlyMatched || r.deriv.matched))}
+              onOpen={onOpen}
+              initialSort={{ i: 9, dir: 1 }}
+              empty={f.onlyMatched ? 'No stock matches every condition right now.' : 'No 5-minute data yet.'}
+              cols={[
+                SYM,
+                SEC,
+                LOT,
+                LTP,
+                { label: 'EMA 9', x: (r) => r.ema9i, cell: (r) => <span className={r.ema9i > r.ema21i ? 'up-t' : 'down-t'}>{price(r.ema9i)}</span>, cls: 'num', hide: 'md' },
+                { label: 'EMA 21', x: (r) => r.ema21i, cell: (r) => price(r.ema21i), cls: 'num', hide: 'md' },
+                { label: 'EMA 50 Trend', x: (r) => r.deriv.trend, cell: (r) => <span className={r.ltp > r.ema50i ? 'up-t' : 'down-t'}>{r.deriv.trend}</span>, str: true, hide: 'sm' },
+                { label: 'ADX (14)', x: (r) => r.adxI, cell: (r) => <span className={r.adxI >= f.adx ? 'up-t' : 'muted'}>{dec(r.adxI, 0)}</span>, cls: 'num', hide: 'sm' },
+                { label: 'SMC Zone (5m)', x: (r) => r.deriv.zone, cell: (r) => <span className={r.deriv.zone === 'DEMAND' ? 'up-t' : r.deriv.zone === 'SUPPLY' ? 'down-t' : 'muted'}>{r.deriv.zone === 'NEUTRAL' ? 'Neutral' : `${r.deriv.zone === 'DEMAND' ? 'Demand' : 'Supply'} Zone`}</span>, str: true },
+                { label: 'Condition Match', x: (r) => (r.deriv.matched ? 0 : r.deriv.fresh ? 1 : 2), cell: (r) => (r.deriv.matched ? <span className={r.deriv.dir === 'BULL' ? 'up-t' : 'down-t'}>MATCHED</span> : <span className="muted">No</span>) },
+                { label: 'Scanner Signal', x: (r) => r.deriv.label, cell: (r) => <Tag v={r.deriv} />, str: true },
+                { label: 'Vol Spike (10D x)', x: (r) => r.vol5mX, cell: (r) => <span className={r.vol5mX >= f.volX ? 'up-t' : 'muted'}>{mult(r.vol5mX)}</span>, cls: 'num', hide: 'sm' },
+                { label: '5m Volume', x: (r) => r.vol5m, cell: (r) => compact(r.vol5m), cls: 'num', hide: 'md' },
+                { label: '10D Avg Vol (5m)', x: (r) => r.vol5mAvg, cell: (r) => compact(r.vol5mAvg), cls: 'num', hide: 'md' },
+                { label: 'EMA Crossover (5m)', x: (r) => (r.crossDir ? r.crossAgo : 99), cell: (r) => (r.crossDir ? <span className={r.crossDir === 'BULL' ? 'up-t' : 'down-t'}>{r.crossDir} CROSS {r.crossAgo === 0 ? '(this bar)' : `(${r.crossAgo} bar${r.crossAgo > 1 ? 's' : ''} ago)`}</span> : <span className="muted">-</span>), hide: 'sm' },
+                { label: 'Candle Time', x: (r) => r.candleAt || '', cell: (r) => (r.candleAt ? new Date(r.candleAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : '-'), str: true, hide: 'md' },
+                { label: 'RSI (14)', x: (r) => r.rsiI, cell: (r) => <Tag v={rsiStatus(r.rsiI)} />, hide: 'md' },
+                { label: 'Stop Loss', x: (r) => r.deriv.plan?.stop, cell: (r) => <span className="down-t">{price(r.deriv.plan?.stop)}</span>, cls: 'num', hide: 'sm', card: true },
+                { label: 'Target 1', x: (r) => r.deriv.plan?.t1, cell: (r) => <span className="up-t">{price(r.deriv.plan?.t1)}</span>, cls: 'num', hide: 'sm', card: true },
+                { label: 'Target 2', x: (r) => r.deriv.plan?.t2, cell: (r) => <span className="up-t">{price(r.deriv.plan?.t2)}</span>, cls: 'num', hide: 'md' },
+                { label: 'ATM Option', x: (r) => r.deriv.option || '', cell: (r) => <strong className={r.deriv.dir === 'BULL' ? 'up-t' : 'down-t'}>{r.deriv.option || '-'}</strong>, str: true },
+              ]}
+              key="deriv"
+            />
+          </>
         )}
         {view === 'patterns' && (
           <>
@@ -697,7 +744,7 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
         {view === 'fii' && <Participants p={meta.participants} />}
       </Card>
       <p className="small muted">
-        Live: price, change, VWAP side, CPR zone, ATM strike and every signal move with each price tick (seconds). Intraday VWAP, EMA 9/15, RSI, MACD, opening range and CPR
+        Live: price, change, VWAP side, CPR zone, ATM strike and every signal move with each price tick (seconds). Intraday VWAP, EMA 9/21, RSI, MACD, F&O derivatives cross, opening range and CPR
         refresh every 2 minutes on the live site. Daily indicators update with the data file. Option chain, OI and futures: {eod}.
       </p>
 
@@ -754,10 +801,10 @@ function cprCell(r, c) {
 }
 
 function emaVwap(r) {
-  if (!has(r.vwap)) return '-';
-  const up = r.ema9i > r.ema15i;
+  if (!has(r.vwap) || !has(r.emaSl)) return '-';
+  const up = r.ema9i > r.emaSl;
   const above = r.ltp > r.vwap;
-  return `${up ? '9>15' : '9<15'} EMA & ${above ? '>VWAP' : '<VWAP'}`;
+  return `9${up ? '>' : '<'}${r.emaN} EMA & ${above ? '>VWAP' : '<VWAP'}`;
 }
 
 function Setups({ rows, onOpen, ctx }) {
@@ -774,7 +821,7 @@ function Setups({ rows, onOpen, ctx }) {
     LTP,
     CHG,
     { label: 'Vol Spike', x: (r) => r.volSpike, cell: (r) => mult(r.volSpike), cls: 'num', hide: 'sm' },
-    { label: '9/15 EMA & VWAP', x: (r) => emaVwap(r), cell: (r) => <span className={r.ema9i > r.ema15i && r.ltp > r.vwap ? 'up-t' : r.ema9i < r.ema15i && r.ltp < r.vwap ? 'down-t' : 'muted'}>{emaVwap(r)}</span>, str: true, hide: 'md' },
+    { label: `${emaPairLabel(ctx.settings.screener)} EMA & VWAP`, x: (r) => emaVwap(r), cell: (r) => <span className={r.ema9i > r.emaSl && r.ltp > r.vwap ? 'up-t' : r.ema9i < r.emaSl && r.ltp < r.vwap ? 'down-t' : 'muted'}>{emaVwap(r)}</span>, str: true, hide: 'md' },
     { label: 'RSI / ADX', x: (r) => `RSI ${dec(r.rsi, 1)} | ${dec(r.adx, 0)} ADX`, sort: false, hide: 'md' },
     { label: 'Option Strike (ATM)', x: (r) => `${r.atm} ${side === 'BULL' ? 'CE' : 'PE'}`, cell: (r) => <strong className={side === 'BULL' ? 'up-t' : 'down-t'}>{r.atm} {side === 'BULL' ? 'CE' : 'PE'}</strong>, sort: false },
     LOT,
@@ -971,7 +1018,7 @@ function IndexOptions({ indices, c, onChain, meta, oiTag = 'EOD' }) {
                   <span title={ix.vwapProxy ? 'Index has no traded volume, so this is the average of the 5-minute typical price' : undefined}>{ix.vwapProxy ? 'VWAP (no volume)' : 'VWAP'}</span>
                   <strong className={s.above ? 'up-t' : s.above === false ? 'down-t' : ''}>{price(ix.vwap)}</strong>
                 </div>
-                <div className="stat"><span>EMA 9 / 15 (5m)</span><strong>{price(ix.ema9i)} / {price(ix.ema15i)}</strong></div>
+                <div className="stat"><span>EMA {emaPairLabel(c).replace('/', ' / ')} (5m)</span><strong>{price(ix.ema9i)} / {price(slowEma(ix, c))}</strong></div>
                 <div className="stat"><span>RSI (5-min)</span><strong>{dec(ix.rsiI, 1)}</strong></div>
                 <div className="stat"><span>ATM</span><strong>{num0(s.atm)}</strong></div>
                 <div className="stat"><span>PCR ({oiTag})</span><strong className={toneClass(sent.tone)}>{dec(ix.pcr, 2)}</strong></div>

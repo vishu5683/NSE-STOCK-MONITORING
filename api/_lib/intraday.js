@@ -1,5 +1,5 @@
 // Live intraday layer for every stock and index, built on the server from Yahoo 5-minute candles
-// (chart endpoint, 5 trading days, one call per symbol, 10 at a time: ~260 calls in ~4 s).
+// (chart endpoint, one month: 5 sessions for the indicators, 10 for the volume baseline; one call per symbol, 10 at a time: ~260 calls in ~4 s).
 // It gives the browser the same fields as data-pipeline/intraday.py, but fresh:
 //   EMA 9 / 15, RSI 14, MACD 12/26/9, VWAP, opening range (first 15 min), day open,
 //   previous session high / low / close and the CPR built from it.
@@ -131,13 +131,81 @@ export function to15m(bars, dayOf) {
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const istDay = (sec) => new Date(sec * 1000 + IST_MS).toISOString().slice(0, 10);
 
+// Wilder ATR and ADX (n) on bars {h, l, c}: { atr, adx }
+export function atrAdx(bars, n = 14) {
+  if (bars.length < 2 * n + 1) return null;
+  let atr = null;
+  let pdm = null;
+  let ndm = null;
+  let adx = null;
+  for (let i = 1; i < bars.length; i += 1) {
+    const { h, l } = bars[i];
+    const p = bars[i - 1];
+    const tr = Math.max(h - l, Math.abs(h - p.c), Math.abs(l - p.c));
+    const up = h - p.h;
+    const dn = p.l - l;
+    atr = atr === null ? tr : (atr * (n - 1) + tr) / n;
+    pdm = pdm === null ? (up > dn && up > 0 ? up : 0) : (pdm * (n - 1) + (up > dn && up > 0 ? up : 0)) / n;
+    ndm = ndm === null ? (dn > up && dn > 0 ? dn : 0) : (ndm * (n - 1) + (dn > up && dn > 0 ? dn : 0)) / n;
+    const pdi = atr ? (100 * pdm) / atr : 0;
+    const ndi = atr ? (100 * ndm) / atr : 0;
+    const dx = pdi + ndi ? (100 * Math.abs(pdi - ndi)) / (pdi + ndi) : 0;
+    adx = adx === null ? dx : (adx * (n - 1) + dx) / n;
+  }
+  return { atr, adx };
+}
+
+// Fast / slow EMA cross within the last `look` bars: { dir: 'BULL' | 'BEAR', ago } (ago 0 = latest bar)
+export function lastCross(fast, slow, look = 5) {
+  for (let ago = 0; ago < look; ago += 1) {
+    const i = fast.length - 1 - ago;
+    if (i < 1) break;
+    const was = fast[i - 1] - slow[i - 1];
+    const now = fast[i] - slow[i];
+    if (was <= 0 && now > 0) return { dir: 'BULL', ago };
+    if (was >= 0 && now < 0) return { dir: 'BEAR', ago };
+  }
+  return null;
+}
+
+/**
+ * SMC order-block zone on 5-minute bars. A demand block is the last down candle before a move that
+ * closes at least one ATR above its high within three bars; it holds until a close below its low.
+ * Supply is the mirror. Price inside a live block, or within a quarter ATR of it, is in that zone.
+ */
+export function smcZone(bars, atr, look = 60) {
+  if (!atr || bars.length < 10) return 'NEUTRAL';
+  const from = Math.max(0, bars.length - look);
+  const last = bars[bars.length - 1].c;
+  const pad = atr * 0.25;
+  let demand = null;
+  let supply = null;
+  for (let i = from; i < bars.length - 1; i += 1) {
+    const b = bars[i];
+    const next = bars.slice(i + 1, i + 4);
+    if (b.c < b.o && next.some((x) => x.c >= b.h + atr)) demand = { lo: b.l, hi: b.h, i };
+    if (b.c > b.o && next.some((x) => x.c <= b.l - atr)) supply = { lo: b.l, hi: b.h, i };
+  }
+  const holds = (z, broken) => z && !bars.slice(z.i + 1).some(broken);
+  if (holds(demand, (x) => x.c < demand.lo) && last >= demand.lo && last <= demand.hi + pad) return 'DEMAND';
+  if (holds(supply, (x) => x.c > supply.hi) && last <= supply.hi && last >= supply.lo - pad) return 'SUPPLY';
+  return 'NEUTRAL';
+}
+
 // bars: [{ t, o, h, l, c, v }] oldest first
-export function indicatorsFrom(bars, { index = false } = {}) {
-  const clean = bars.filter((b) => b.c > 0);
+export function indicatorsFrom(bars, { index = false, now = Date.now() } = {}) {
+  const all = bars.filter((b) => b.c > 0);
+  if (all.length < MIN_BARS) return null;
+  // the 5-minute indicators use the last 5 sessions as before; the volume baseline uses up to 10 more
+  const sessions = [...new Set(all.map((b) => istDay(b.t)))];
+  const recentFrom = sessions[Math.max(0, sessions.length - 5)];
+  const clean = all.filter((b) => istDay(b.t) >= recentFrom);
   if (clean.length < MIN_BARS) return null;
   const closes = clean.map((b) => b.c);
   const e9 = emaSeries(closes, 9);
   const e15 = emaSeries(closes, 15);
+  const e21 = emaSeries(closes, 21);
+  const e50 = emaSeries(closes, 50);
   const e12 = emaSeries(closes, 12);
   const e26 = emaSeries(closes, 26);
   const macd = e12.map((v, i) => v - e26[i]);
@@ -147,6 +215,8 @@ export function indicatorsFrom(bars, { index = false } = {}) {
   const out = {
     ema9i: r2(e9[last]),
     ema15i: r2(e15[last]),
+    ema21i: r2(e21[last]),
+    ema50i: r2(e50[last]),
     rsiI: rsi === null ? null : Math.round(rsi * 10) / 10,
     macdI: r3(macd[last]),
     macdIsig: r3(sig[last]),
@@ -170,6 +240,24 @@ export function indicatorsFrom(bars, { index = false } = {}) {
     out.trend15 = lc > a9 && a9 > a21 ? 'UP' : lc < a9 && a9 < a21 ? 'DOWN' : 'SIDEWAYS';
     const r15 = rsiLast(c15);
     out.rsi15 = r15 === null ? null : Math.round(r15 * 10) / 10;
+  }
+
+  // F&O Derivatives scanner inputs: ADX / ATR, SMC zone, 9/21 cross, and the last complete
+  // 5-minute bar's volume against the average 5-minute bar of the previous 10 sessions
+  const aa = atrAdx(clean);
+  if (aa) Object.assign(out, { adxI: Math.round(aa.adx * 10) / 10, atrI: r2(aa.atr), smcZone: smcZone(clean, aa.atr) });
+  const cross = lastCross(e9, e21, 5);
+  if (cross) Object.assign(out, { crossDir: cross.dir, crossAgo: cross.ago });
+  const forming = clean[last].t * 1000 + 5 * 60 * 1000 > now;
+  const volBar = forming && last > 0 ? clean[last - 1] : clean[last];
+  if (!index && volBar?.t) {
+    const day = istDay(volBar.t);
+    const baseDays = new Set(sessions.filter((d) => d < day).slice(-10));
+    const base = all.filter((b) => baseDays.has(istDay(b.t)));
+    const avg = base.length ? base.reduce((a, b) => a + (b.v > 0 ? b.v : 0), 0) / base.length : 0;
+    out.vol5m = Math.round(volBar.v || 0);
+    if (avg > 0) Object.assign(out, { vol5mAvg: Math.round(avg), vol5mX: Math.round((volBar.v / avg) * 100) / 100 });
+    out.candleAt = new Date(volBar.t * 1000).toISOString();
   }
 
   // today = the session of the last bar (IST); previous = the session before it
@@ -225,7 +313,7 @@ export async function fetchChart(ticker) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}${encodeURIComponent(ticker)}?range=5d&interval=5m`, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: ctl.signal });
+    const res = await fetch(`${BASE}${encodeURIComponent(ticker)}?range=1mo&interval=5m`, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: ctl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } finally {

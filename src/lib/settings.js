@@ -25,7 +25,9 @@ const FALLBACK = {
     macdCross: true,
     cprFilter: true,
     cprWidePct: 0.5,
+    emaSlow: 21,
   },
+  fno: { lookback: 2, adx: 23, smc: true, volX: 2, onlyMatched: false },
   hidden: [],
   watchlist: [],
 };

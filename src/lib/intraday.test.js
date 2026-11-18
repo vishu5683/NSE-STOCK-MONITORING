@@ -102,3 +102,28 @@ test('pattern tags and participant view', () => {
   assert.equal(v.idxFutNetChg, 9675);
   assert.equal(v.idxOptBias, 6);
 });
+
+test('EMA pair: 9/21 by default, 9/15 when chosen, 15 when a row has no EMA 21', async () => {
+  const { slowEma, slowLen } = await import('./intraday.js');
+  const r = { ema15i: 402, ema21i: 410 };
+  assert.equal(slowEma(r, {}), 410);
+  assert.equal(slowEma(r, { emaSlow: 15 }), 402);
+  assert.equal(slowLen({ ema15i: 402 }, {}), 15);
+  const sell = intradaySignal({ ...base, ema21i: 406 }, C);
+  assert.notEqual(sell.signal, 'BUY');
+  assert.equal(intradaySignal({ ...base, ema21i: 401 }, C).reason, 'Above VWAP, 9>21 EMA');
+});
+
+test('F&O derivatives: fresh 9/21 cross + EMA 50 + ADX + demand zone + volume = MATCHED', async () => {
+  const { fnoSignal, FNO_DEFAULTS } = await import('./intraday.js');
+  const r = { ltp: 1554.7, ema9i: 1550.1, ema21i: 1549.6, ema50i: 1540, adxI: 28, smcZone: 'DEMAND', vol5mX: 10.7, crossDir: 'BULL', crossAgo: 0, atrI: 4, rsiI: 59 };
+  const s = fnoSignal(r, C, FNO_DEFAULTS);
+  assert.equal(s.matched, true);
+  assert.equal(s.label, 'BULL CROSS + DEMAND + VOL 10.7x');
+  assert.equal(s.plan.stop, 1548.7);
+  assert.equal(fnoSignal({ ...r, vol5mX: 0.6 }, C, FNO_DEFAULTS).label, 'BULL CROSS (Low Vol 0.6x)');
+  assert.equal(fnoSignal({ ...r, smcZone: 'NEUTRAL' }, C, FNO_DEFAULTS).matched, false);
+  assert.equal(fnoSignal({ ...r, smcZone: 'NEUTRAL' }, C, { ...FNO_DEFAULTS, smc: false }).matched, true);
+  assert.equal(fnoSignal({ ...r, crossAgo: 3 }, C, FNO_DEFAULTS).fresh, false);
+  assert.equal(fnoSignal({ ltp: 1 }, C, FNO_DEFAULTS), null);
+});

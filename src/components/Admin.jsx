@@ -4,6 +4,7 @@ import { logout, LOGIN_ENABLED } from '../lib/auth.js';
 import { clearSavedSettings } from '../lib/settings.js';
 import { ageText } from '../lib/fmt.js';
 import { analyseAll } from '../lib/signals.js';
+import { FNO_DEFAULTS } from '../lib/intraday.js';
 
 const RULE_PRESETS = {
   'Client sheet': { minScore: 60, volSpike: 2, bullRsi: 55, bearRsi: 45, adx: 22, atrMult: 1.5, rr1: 1.5, rr2: 2.5, requireVolume: false },
@@ -49,6 +50,11 @@ function Panel({ settings, onChange, meta, universe, stocks, onLogout }) {
   };
   const setSc = (k, v) => {
     setDraft((d) => ({ ...d, screener: { ...d.screener, [k]: v } }));
+    setSaved(false);
+  };
+  const fno = { ...FNO_DEFAULTS, ...(draft.fno || {}) };
+  const setFno = (k, v) => {
+    setDraft((d) => ({ ...d, fno: { ...FNO_DEFAULTS, ...(d.fno || {}), [k]: v } }));
     setSaved(false);
   };
 
@@ -190,15 +196,37 @@ function Panel({ settings, onChange, meta, universe, stocks, onLogout }) {
           <h3 className="sub">Intraday scanner rules</h3>
           <div className="form-grid">
             <NumField label="Wide CPR above %" hint="wider = consolidation, no trade" value={sc.cprWidePct} onChange={(v) => setSc('cprWidePct', v)} step={0.05} min={0.05} />
+            <label className="field">
+              <span>Intraday EMA pair</span>
+              <select className="input" value={sc.emaSlow === 15 ? 15 : 21} onChange={(e) => setSc('emaSlow', Number(e.target.value))}>
+                <option value={21}>9 / 21 (client sheet)</option>
+                <option value={15}>9 / 15</option>
+              </select>
+            </label>
           </div>
           {[
             ['requireVwap', 'Require VWAP alignment (long above VWAP, short below)'],
-            ['requireEma915', 'Require 9/15 EMA (long 9 above 15, short 9 below 15)'],
+            ['requireEma915', 'Require the EMA pair (long: 9 above the slow EMA, short: 9 below it)'],
             ['macdCross', 'Require MACD above / below its signal line'],
             ['cprFilter', 'No trade inside the CPR or on a wide CPR day'],
           ].map(([k, text]) => (
             <label key={k} className="check">
               <input type="checkbox" checked={sc[k] !== false} onChange={(e) => setSc(k, e.target.checked)} />
+              <span>{text}</span>
+            </label>
+          ))}
+          <h3 className="sub">F&amp;O Derivatives scanner (5-minute)</h3>
+          <div className="form-grid">
+            <NumField label="Cross within last bars" hint="1 = latest bar only" value={fno.lookback} onChange={(v) => setFno('lookback', v)} min={1} max={5} />
+            <NumField label="ADX (14) at least" value={fno.adx} onChange={(v) => setFno('adx', v)} min={0} max={100} />
+            <NumField label="5-min volume spike (x)" hint="vs 10-session average bar" value={fno.volX} onChange={(v) => setFno('volX', v)} step={0.1} min={0} />
+          </div>
+          {[
+            ['smc', 'Require an SMC demand zone (buy) or supply zone (sell)'],
+            ['onlyMatched', 'Show only fully matched stocks'],
+          ].map(([k, text]) => (
+            <label key={k} className="check">
+              <input type="checkbox" checked={!!fno[k]} onChange={(e) => setFno(k, e.target.checked)} />
               <span>{text}</span>
             </label>
           ))}

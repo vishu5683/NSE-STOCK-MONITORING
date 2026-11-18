@@ -772,3 +772,31 @@ test('daily messages: open, close summary, health report', async () => {
     delete process.env.TELEGRAM_OWNER_CHAT_ID;
   }
 });
+
+test('intraday layer: ADX, 9/21 cross, SMC zone and the 10-session 5-minute volume base', () => {
+  const day = 86400;
+  const bars = [];
+  const t0 = Date.UTC(2026, 10, 2, 3, 45) / 1000;
+  for (let d = 0; d < 12; d += 1) {
+    for (let k = 0; k < 75; k += 1) {
+      const p = 100 + Math.sin((d * 75 + k) / 9) * 2;
+      bars.push({ t: t0 + d * day + k * 300, o: p, h: p + 0.5, l: p - 0.5, c: p + 0.1, v: 1000 });
+    }
+  }
+  bars[bars.length - 2].v = 5000;
+  const out = intradayLib.indicatorsFrom(bars, { now: (bars[bars.length - 1].t + 60) * 1000 });
+  assert.ok(out.ema21i && out.ema50i && out.adxI > 0 && out.atrI > 0);
+  assert.equal(out.vol5m, 5000);
+  assert.equal(out.vol5mAvg, 1000);
+  assert.equal(out.vol5mX, 5);
+  assert.ok(['DEMAND', 'SUPPLY', 'NEUTRAL'].includes(out.smcZone));
+  assert.deepEqual(intradayLib.lastCross([1, 3], [2, 2], 2), { dir: 'BULL', ago: 0 });
+  assert.equal(intradayLib.lastCross([1, 1, 1], [2, 2, 2], 3), null);
+  const ob = [
+    ...Array.from({ length: 8 }, (_, i) => ({ o: 100, h: 101, l: 99, c: 100 + (i % 2 ? 0.2 : -0.2) })),
+    { o: 100, h: 100.5, l: 98, c: 98.5 },
+    { o: 98.5, h: 103, l: 98.4, c: 102.5 },
+    { o: 102.5, h: 102.6, l: 99.8, c: 100.2 },
+  ];
+  assert.equal(intradayLib.smcZone(ob, 1.5), 'DEMAND');
+});

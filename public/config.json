@@ -17,8 +17,16 @@
     "requireEma915": true,
     "macdCross": true,
     "cprFilter": true,
-    "cprWidePct": 0.5
+    "cprWidePct": 0.5,
+    "emaSlow": 21
   },
   "hidden": [],
-  "watchlist": []
+  "watchlist": [],
+  "fno": {
+    "lookback": 2,
+    "adx": 23,
+    "smc": true,
+    "volX": 2,
+    "onlyMatched": false
+  }
 }

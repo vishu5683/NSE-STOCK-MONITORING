@@ -287,3 +287,10 @@ More free NSE public archive files in `data-pipeline/nse_extras.py` (same plain 
 - /api/candles reads Upstox v3 intraday 5-min candles first, Yahoo as fallback (payload.source).
 - /api/oi in market hours: 207 chains took longer than the 30 s function limit at 4 parallel; now 12 parallel paced at 25/s with a 22 s budget (8.9 s measured, 0 failed). First OI after page load takes ~10 s; labels show EOD until then.
 - Not done: OI / PCR trend over the day and browser push alerts need storage (Upstash Redis free tier); Telegram skipped by the user.
+
+## 22. Client sheet update of 18-Nov-2026: EMA 9/21 and the F&O Derivatives tab
+- The sheet moved its intraday EMA pair from 9/15 to 9/21. `screener.emaSlow` (default 21, Admin can pick 15) drives Intraday, Profitable Setups, Index Options and the Excel export. Rows without `ema21i` fall back to 15.
+- New Pro Sheet tab **F&O Derivatives** (sheet tabs "NSE F&O Derivatives" + "NSE F&O Settings"): 5-minute EMA 9/21 cross within `fno.lookback` bars, price vs EMA 50, ADX 14 >= `fno.adx`, SMC zone, last complete 5-minute bar volume vs the average 5-minute bar of the previous 10 sessions >= `fno.volX`. SL / T1 / T2 = 5-minute ATR x the screener multipliers. Settings in Admin.
+- SMC zone (`smcZone` in `api/_lib/intraday.js`): demand = last down candle before a close at least 1 ATR above its high within three bars, valid until a close below its low; supply is the mirror; price inside or within 0.25 ATR = in the zone. The sheet does not publish its own SMC rule, so this is our stated definition.
+- `/api/intraday` now asks Yahoo for one month of 5-minute bars (indicators still use the last 5 sessions, the volume base the 10 before today). Full refresh of 259 stocks measured at ~6 s, payload ~160 KB.
+- Pipeline fix the same day: the NSE fill now also adds a session NSE has published when Yahoo is late for every stock (18-Nov 04:00 IST run had all 259 on 16-Nov).

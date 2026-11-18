@@ -8,7 +8,7 @@ public/data/latest.json for the website.
 Honest limits (also shown in the app):
   * Yahoo data for NSE is delayed (about 15 minutes) and unofficial. Fine for a screener,
     not for order execution.
-  * Intraday VWAP / EMA 9/15 / CPR come from 5-minute candles (intraday.py). There is no free
+  * Intraday VWAP / EMA 9/21 / CPR come from 5-minute candles (intraday.py). There is no free
     reliable option chain, OI or futures feed, so those are NOT faked.
 
 If too many symbols fail, the script exits with an error and leaves the old file untouched.
@@ -332,7 +332,7 @@ def main() -> int:
             continue
         stocks.append({"s": row["symbol"], "sec": row["sector"], "lot": lots.get(row["symbol"]), **built})
 
-    # ---- intraday layer (VWAP, EMA 9/15, CPR, ATM). Optional: a failure here never blocks the daily data ----
+    # ---- intraday layer (VWAP, EMA 9/15/21/50, CPR, ATM). Optional: a failure here never blocks the daily data ----
     intraday_ok = 0
     iframes = {}
     try:
@@ -469,7 +469,7 @@ def main() -> int:
             "health": health,
             "notes": [
                 "Volume spike compares the last completed session with its 20-day average.",
-                "Intraday VWAP, EMA 9/15 and CPR come from Yahoo 5-minute candles.",
+                "Intraday VWAP, EMA 9/21 and CPR come from Yahoo 5-minute candles.",
                 f"Futures OI, option chain, PCR, max pain, IV and lot sizes come from the NSE F&O bhavcopy of {fo_date or 'n/a'} (end of day, not live).",
                 "Lot sizes: NSE bhavcopy when available, else lot_sizes.csv (client sheet of 8-Nov-2026).",
                 "Screener output is rule-based research, not investment advice.",

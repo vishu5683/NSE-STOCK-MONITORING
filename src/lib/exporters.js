@@ -1,6 +1,6 @@
 import { price, pct, dec, mult } from './fmt.js';
 import { weeklyLabel, monthlyLabel, convictionLabel, breakoutLabel } from './signals.js';
-import { intradaySignal, settingsMatch, cprLabel, atmFor, indexSignal } from './intraday.js';
+import { intradaySignal, settingsMatch, cprLabel, atmFor, indexSignal, slowEma, emaPairLabel } from './intraday.js';
 
 function download(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -136,7 +136,7 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
     ...[
       ['Minimum score', n(c.minScore)], ['Volume spike (x)', n(c.volSpike)], ['Bull RSI >=', n(c.bullRsi)], ['Bear RSI <=', n(c.bearRsi)], ['ADX >=', n(c.adx)],
       ['Stop loss = ATR x', n(c.atrMult)], ['Target 1 = risk x', n(c.rr1)], ['Target 2 = risk x', n(c.rr2)], ['Volume required', text(c.requireVolume ? 'Yes' : 'No')],
-      ['VWAP alignment', text(c.requireVwap !== false ? 'Yes' : 'No')], ['9/15 EMA required', text(c.requireEma915 !== false ? 'Yes' : 'No')],
+      ['VWAP alignment', text(c.requireVwap !== false ? 'Yes' : 'No')], [`${emaPairLabel(c)} EMA required`, text(c.requireEma915 !== false ? 'Yes' : 'No')],
       ['MACD cross required', text(c.macdCross !== false ? 'Yes' : 'No')], ['CPR no-trade filter', text(c.cprFilter !== false ? 'Yes' : 'No')], ['Wide CPR above %', n(c.cprWidePct)],
     ].map(([k, v], i) => kv(k, v, i)),
   ];
@@ -184,14 +184,14 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
     .filter(({ x }) => x.signal !== 'NO DATA')
     .sort((a, b) => sigOrder[a.x.signal] - sigOrder[b.x.signal] || (b.r.valueCr ?? 0) - (a.r.valueCr ?? 0));
   const intraday = [
-    head(['Symbol', 'Sector', 'LTP', 'Today %', 'VWAP', 'vs VWAP', 'EMA 9 (5m)', 'EMA 15 (5m)', 'RSI (5m)', 'MACD (5m)', 'MACD signal', 'CPR BC', 'CPR TC', 'CPR width %', 'CPR zone', 'ATM', 'Signal', 'Stop loss', 'Target 1', 'Lot size', 'Settings match', 'Last candle']),
+    head(['Symbol', 'Sector', 'LTP', 'Today %', 'VWAP', 'vs VWAP', 'EMA 9 (5m)', `EMA ${emaPairLabel(c).slice(2)} (5m)`, 'RSI (5m)', 'MACD (5m)', 'MACD signal', 'CPR BC', 'CPR TC', 'CPR width %', 'CPR zone', 'ATM', 'Signal', 'Stop loss', 'Target 1', 'Lot size', 'Settings match', 'Last candle']),
     ...(intraRows.length
       ? intraRows.map(({ r, x }, i) =>
           styleRow(
             [
               { value: r.s, fontWeight: 'bold' }, text(r.sec), n(r.ltp, '#,##0.00', { fontWeight: 'bold' }), changeCell(r.chg), n(r.vwap, '#,##0.00'),
               text(r.ltp > r.vwap ? 'ABOVE' : 'BELOW', { textColor: r.ltp > r.vwap ? '#15803d' : '#b91c1c', fontWeight: 'bold', align: 'center' }),
-              n(r.ema9i, '#,##0.00'), n(r.ema15i, '#,##0.00'), rsiCell(r.rsiI), n(r.macdI, '0.000'), n(r.macdIsig, '0.000'),
+              n(r.ema9i, '#,##0.00'), n(slowEma(r, c), '#,##0.00'), rsiCell(r.rsiI), n(r.macdI, '0.000'), n(r.macdIsig, '0.000'),
               n(r.cprBc, '#,##0.00'), n(r.cprTc, '#,##0.00'), n(r.cprWidthPct, '0.00'), text(cprLabel(r, c), { align: 'center' }), n(atmFor(r), '#,##0'),
               sigCell(x), n(x.plan?.stop, '#,##0.00', { textColor: '#b91c1c' }), n(x.plan?.t1, '#,##0.00', { textColor: '#15803d' }), n(r.lot, '#,##0'),
               text(settingsMatch(r, x).label, { fontWeight: 'bold' }), text(r.iAsOf || ''),
@@ -202,7 +202,7 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
       : [[text('No 5-minute data in this file.')]]),
   ];
   const indexSheet = [
-    head(['Index', 'Spot', 'Today %', 'VWAP', 'vs VWAP', 'EMA 9 (5m)', 'EMA 15 (5m)', 'RSI (5m)', 'ATM', 'Bias', 'Signal', 'Last candle']),
+    head(['Index', 'Spot', 'Today %', 'VWAP', 'vs VWAP', 'EMA 9 (5m)', `EMA ${emaPairLabel(c).slice(2)} (5m)`, 'RSI (5m)', 'ATM', 'Bias', 'Signal', 'Last candle']),
     ...indices
       .filter((x) => x.name !== 'INDIA VIX')
       .map((ix, i) => {
@@ -210,7 +210,7 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
         return styleRow(
           [
             { value: ix.name, fontWeight: 'bold' }, n(ix.ltp, '#,##0.00', { fontWeight: 'bold' }), changeCell(ix.chg), n(ix.vwap, '#,##0.00'),
-            text(s.above === null ? '' : s.above ? 'ABOVE' : 'BELOW', { align: 'center' }), n(ix.ema9i, '#,##0.00'), n(ix.ema15i, '#,##0.00'), rsiCell(ix.rsiI),
+            text(s.above === null ? '' : s.above ? 'ABOVE' : 'BELOW', { align: 'center' }), n(ix.ema9i, '#,##0.00'), n(slowEma(ix, c), '#,##0.00'), rsiCell(ix.rsiI),
             n(s.atm, '#,##0'), text(s.bias, { fontWeight: 'bold', textColor: s.bias.startsWith('BULL') ? '#15803d' : s.bias.startsWith('BEAR') ? '#b91c1c' : '#475569' }),
             sigCell(s), text(ix.iAsOf || ''),
           ],
@@ -238,7 +238,7 @@ export async function exportExcel({ rows, indices, sectors, breadth, meta, setti
       ['ADX 14', 'Trend strength. Higher means a stronger trend, in either direction.'],
       ['EMA 20 / 50 / 200', 'Exponential moving averages of the daily close.'],
       ['From 52W high / low %', 'Distance of the last price from the 52-week high and low.'],
-      ['Intraday sheet', 'VWAP, EMA 9/15, RSI and MACD from the 5-minute candles. BUY = above VWAP, 9 EMA above 15 EMA, MACD above signal, RSI at or above the bullish level. SELL is the mirror. NO-TRADE = price inside the CPR or a wide CPR day.'],
+      ['Intraday sheet', 'VWAP, EMA 9/21 (or 9/15 when chosen in Admin), RSI and MACD from the 5-minute candles. BUY = above VWAP, 9 EMA above the slow EMA, MACD above signal, RSI at or above the bullish level. SELL is the mirror. NO-TRADE = price inside the CPR or a wide CPR day.'],
       ['CPR', 'Central pivot range from the previous session: pivot = (H+L+C)/3, BC = (H+L)/2, TC = 2 x pivot - BC. Wide when (TC-BC)/pivot is above the Settings %.'],
       ['ATM', 'At-the-money strike rounded to the usual NSE strike gap for that price. Verify the exact strike in the option chain.'],
       ['Data', `${meta.source}. Daily candles plus 5-minute candles. Data date ${meta.lastTradingDate}.`],

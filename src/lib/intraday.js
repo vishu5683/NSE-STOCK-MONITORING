@@ -87,12 +87,20 @@ export function cprLabel(r, c) {
   return !z ? '' : z.wide ? 'WIDE' : z.inside ? 'INSIDE' : z.above ? 'ABOVE' : 'BELOW';
 }
 
+// Slow intraday EMA: 21 like the client sheet (since 18-Nov-2026), or 15 when the admin picks it.
+// Rows from an older data file have no EMA 21 yet, so they fall back to 15.
+export const slowLen = (r, c) => (c?.emaSlow === 15 || !has(r?.ema21i) ? 15 : 21);
+export const slowEma = (r, c) => (slowLen(r, c) === 21 ? r.ema21i : r.ema15i);
+export const emaPairLabel = (c) => `9/${c?.emaSlow === 15 ? 15 : 21}`;
+
 /**
- * Intraday signal, same order as the sheet: no-trade checks first, then RSI + VWAP + 9/15 EMA + MACD.
+ * Intraday signal, same order as the sheet: no-trade checks first, then RSI + VWAP + 9/21 EMA + MACD.
  * Returns { signal: 'BUY'|'SELL'|'WAIT'|'NO-TRADE'|'NO DATA', reason, option, plan }.
  */
 export function intradaySignal(r, c, indexName) {
-  if (!has(r.vwap) || !has(r.ema9i) || !has(r.ema15i)) return { signal: 'NO DATA', reason: 'No 5-minute candles' };
+  const slow = slowEma(r, c);
+  const n = slowLen(r, c);
+  if (!has(r.vwap) || !has(r.ema9i) || !has(slow)) return { signal: 'NO DATA', reason: 'No 5-minute candles' };
   const zone = cprZone(r, c);
   if (c.cprFilter !== false && zone) {
     if (zone.inside) return { signal: 'NO-TRADE', reason: 'Inside CPR' };
@@ -104,16 +112,16 @@ export function intradaySignal(r, c, indexName) {
   const long =
     has(rsiV) && rsiV >= c.bullRsi &&
     (c.requireVwap === false || r.ltp > r.vwap) &&
-    (c.requireEma915 === false || r.ema9i > r.ema15i) &&
+    (c.requireEma915 === false || r.ema9i > slow) &&
     (c.macdCross === false || macdUp);
   const short =
     has(rsiV) && rsiV <= c.bearRsi &&
     (c.requireVwap === false || r.ltp < r.vwap) &&
-    (c.requireEma915 === false || r.ema9i < r.ema15i) &&
+    (c.requireEma915 === false || r.ema9i < slow) &&
     (c.macdCross === false || macdDn);
   const atm = atmStrike(r.ltp, indexName, r.step);
-  if (long) return { signal: 'BUY', reason: 'Above VWAP, 9>15 EMA', option: atm ? `${atm} CE` : null, plan: tradePlan(r, 'BULL', c) };
-  if (short) return { signal: 'SELL', reason: 'Below VWAP, 9<15 EMA', option: atm ? `${atm} PE` : null, plan: tradePlan(r, 'BEAR', c) };
+  if (long) return { signal: 'BUY', reason: `Above VWAP, 9>${n} EMA`, option: atm ? `${atm} CE` : null, plan: tradePlan(r, 'BULL', c) };
+  if (short) return { signal: 'SELL', reason: `Below VWAP, 9<${n} EMA`, option: atm ? `${atm} PE` : null, plan: tradePlan(r, 'BEAR', c) };
   return { signal: 'WAIT', reason: r.ltp > r.vwap ? 'Above VWAP, rules not all met' : 'Below VWAP, rules not all met' };
 }
 
@@ -154,13 +162,14 @@ export function swingSignal(r, c) {
   return { label: 'WAIT', tone: 'flat', plan: null };
 }
 
-// Index view: spot vs VWAP, 9/15 EMA, RSI -> CE / PE bias.
+// Index view: spot vs VWAP, 9/21 EMA, RSI -> CE / PE bias.
 export function indexSignal(ix, c) {
   const intra = intradaySignal(ix, { ...c, cprFilter: false }, ix.name);
   const above = has(ix.vwap) ? ix.ltp > ix.vwap : null;
   let bias = 'NEUTRAL';
-  if (above && ix.ema9i > ix.ema15i) bias = 'BULLISH (CALL FAVORED)';
-  else if (above === false && ix.ema9i < ix.ema15i) bias = 'BEARISH (PUT FAVORED)';
+  const slow = slowEma(ix, c);
+  if (above && ix.ema9i > slow) bias = 'BULLISH (CALL FAVORED)';
+  else if (above === false && ix.ema9i < slow) bias = 'BEARISH (PUT FAVORED)';
   return { ...intra, above, bias, atm: atmStrike(ix.ltp, ix.name, ix.step) };
 }
 
@@ -270,4 +279,47 @@ export function trend15Label(r) {
   if (!r.trend15) return { label: '-', tone: 'flat' };
   const rs = has(r.rsi15) ? ` · RSI ${Math.round(r.rsi15)}` : '';
   return { label: `${r.trend15}${rs}`, tone: r.trend15 === 'UP' ? 'up' : r.trend15 === 'DOWN' ? 'down' : 'flat' };
+}
+
+// ---------- NSE F&O Derivatives scanner (client sheet tab, 5-minute) ----------
+
+export const FNO_DEFAULTS = { lookback: 2, adx: 23, smc: true, volX: 2, onlyMatched: false };
+
+/**
+ * EMA 9/21 cross on 5-minute candles within `lookback` bars, with the EMA 50 trend, ADX, an SMC
+ * demand / supply zone and the 5-minute volume against its 10-session average.
+ * Returns { dir, matched, label, tone, trend, zone, option, plan } or null without 5-minute data.
+ */
+export function fnoSignal(r, c, f = FNO_DEFAULTS) {
+  if (![r.ema9i, r.ema21i, r.ema50i].every(has)) return null;
+  const fresh = r.crossDir && has(r.crossAgo) && r.crossAgo < f.lookback ? r.crossDir : null;
+  const dir = fresh || (r.ema9i > r.ema21i ? 'BULL' : 'BEAR');
+  const bull = dir === 'BULL';
+  const trendOk = bull ? r.ltp > r.ema50i : r.ltp < r.ema50i;
+  const adxOk = has(r.adxI) && r.adxI >= f.adx;
+  const zone = r.smcZone || 'NEUTRAL';
+  const zoneOk = !f.smc || zone === (bull ? 'DEMAND' : 'SUPPLY');
+  const volOk = has(r.vol5mX) && r.vol5mX >= f.volX;
+  const matched = Boolean(fresh) && trendOk && adxOk && zoneOk && volOk;
+  const vx = has(r.vol5mX) ? `${r.vol5mX.toFixed(1)}x` : '-';
+  let label;
+  if (!fresh) label = bull ? '9 ABOVE 21 (no fresh cross)' : '9 BELOW 21 (no fresh cross)';
+  else if (matched) label = `${bull ? 'BULL' : 'BEAR'} CROSS + ${bull ? 'DEMAND' : 'SUPPLY'} + VOL ${vx}`;
+  else if (!volOk) label = `${bull ? 'BULL' : 'BEAR'} CROSS (Low Vol ${vx})`;
+  else if (!trendOk) label = `${bull ? 'BULL' : 'BEAR'} CROSS (against EMA 50)`;
+  else if (!adxOk) label = `${bull ? 'BULL' : 'BEAR'} CROSS (ADX ${has(r.adxI) ? Math.round(r.adxI) : '-'} weak)`;
+  else label = `${bull ? 'BULL' : 'BEAR'} CROSS (no ${bull ? 'demand' : 'supply'} zone)`;
+  const atm = atmStrike(r.ltp, null, r.step);
+  const plan = has(r.atrI) && r.atrI > 0 ? tradePlan({ ...r, atr: r.atrI }, dir, c) : null;
+  return {
+    dir,
+    fresh: Boolean(fresh),
+    matched,
+    label,
+    tone: matched ? (bull ? 'up' : 'down') : fresh ? 'warn' : 'flat',
+    trend: r.ltp > r.ema50i ? 'BULLISH (>EMA50)' : 'BEARISH (<EMA50)',
+    zone,
+    option: atm ? `${atm} ${bull ? 'CE' : 'PE'}` : null,
+    plan,
+  };
 }

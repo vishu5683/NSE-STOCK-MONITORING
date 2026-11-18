@@ -1,7 +1,7 @@
 """
 Intraday layer (5-minute candles from Yahoo) for the Intraday Scanner.
 
-Per stock and index: today's VWAP, EMA 9/15, RSI 14, MACD and CPR (from the previous session).
+Per stock and index: today's VWAP, EMA 9/15/21/50, RSI 14, MACD and CPR (from the previous session).
 The signal, CPR zone and ATM strike are worked out in the browser (src/lib/intraday.js) against
 the live price. Everything comes from real candles; a symbol with too few candles is skipped,
 never filled with made-up numbers.
@@ -58,6 +58,8 @@ def build_intraday(df: pd.DataFrame, daily: pd.DataFrame | None) -> dict | None:
     c = df["Close"]
     ema9 = float(c.ewm(span=9, adjust=False).mean().iloc[-1])
     ema15 = float(c.ewm(span=15, adjust=False).mean().iloc[-1])
+    ema21 = float(c.ewm(span=21, adjust=False).mean().iloc[-1])
+    ema50 = float(c.ewm(span=50, adjust=False).mean().iloc[-1])
     macd = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
     macd_sig = macd.ewm(span=9, adjust=False).mean()
     ltp = float(c.iloc[-1])
@@ -67,6 +69,8 @@ def build_intraday(df: pd.DataFrame, daily: pd.DataFrame | None) -> dict | None:
         "vwap": round(vwap, 2),
         "ema9i": round(ema9, 2),
         "ema15i": round(ema15, 2),
+        "ema21i": round(ema21, 2),
+        "ema50i": round(ema50, 2),
         "rsiI": None,
         "macdI": round(float(macd.iloc[-1]), 3),
         "macdIsig": round(float(macd_sig.iloc[-1]), 3),
