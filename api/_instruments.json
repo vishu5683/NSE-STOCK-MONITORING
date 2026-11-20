@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-11-19T22:25:12.388Z",
+ "generatedAt": "2026-11-20T03:39:04.492Z",
  "stocks": {
   "BDL": "NSE_EQ|INE171Z01026",
   "BEL": "NSE_EQ|INE263A01024",
@@ -3341,6 +3341,29 @@
    ],
    "lot": 1550
   },
+  "BANKBARODA": {
+   "underlying": "NSE_EQ|INE028A01039",
+   "futures": [
+    [
+     "2026-11-23",
+     "NSE_FO|61509"
+    ],
+    [
+     "2026-12-29",
+     "NSE_FO|58918"
+    ],
+    [
+     "2027-01-25",
+     "NSE_FO|54782"
+    ]
+   ],
+   "expiries": [
+    "2026-11-23",
+    "2026-12-29",
+    "2027-01-25"
+   ],
+   "lot": 2925
+  },
   "COCHINSHIP": {
    "underlying": "NSE_EQ|INE704P01025",
    "futures": [
@@ -4493,29 +4516,6 @@
     "2027-01-25"
    ],
    "lot": 125
-  },
-  "BANKBARODA": {
-   "underlying": "NSE_EQ|INE028A01039",
-   "futures": [
-    [
-     "2026-11-23",
-     "NSE_FO|61509"
-    ],
-    [
-     "2026-12-29",
-     "NSE_FO|58918"
-    ],
-    [
-     "2027-01-25",
-     "NSE_FO|54782"
-    ]
-   ],
-   "expiries": [
-    "2026-11-23",
-    "2026-12-29",
-    "2027-01-25"
-   ],
-   "lot": 2925
   },
   "DELHIVERY": {
    "underlying": "NSE_EQ|INE148O01028",
