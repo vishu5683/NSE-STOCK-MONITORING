@@ -96,6 +96,17 @@ export async function dailyHealth(base, now = Date.now()) {
         ? `NSE check (${recon.date}): pending (${recon.note || 'NSE file not posted yet'})`
         : `NSE check (${recon.date}): ❌ ${recon.mismatched} of ${recon.checked} differ\n${(recon.items || []).slice(0, 8).map((i) => `  ${i.s} ${i.field}: ours ${i.ours} vs NSE ${i.nse} (${i.diffPct}%)`).join('\n')}`;
   const fundAge = fund?.asOf ? Math.floor((now - Date.parse(fund.asOf)) / 3_600_000) : null;
+  let scan = null;
+  try {
+    scan = JSON.parse((await redis('GET', 'scan:last')) || 'null');
+  } catch {
+    scan = null;
+  }
+  const scanAt = scan?.at ? Date.parse(scan.at) : null;
+  // the scanner stops at 15:35 IST, so on a trading day its last run should be from today
+  const scanLine = !scanAt
+    ? 'Alert scanner: never ran ⚠️'
+    : `Alert scanner: last run ${istDay(scanAt)} ${new Date(scanAt + 5.5 * 3600 * 1000).toISOString().slice(11, 16)} IST${scan.ms ? `, ${(scan.ms / 1000).toFixed(1)} s` : ''}${istDay(scanAt) !== istDay(now) ? ' ⚠️ not today' : ''}${scan.notes?.length ? `\n  ${scan.notes.slice(0, 4).join('\n  ')}` : ''}`;
   const text = [
     `🩺 Data health, ${dayLabel(now)}`,
     `Data file: ${m.generatedAtIST || '?'}, session ${m.lastTradingDate || '?'}`,
@@ -103,6 +114,7 @@ export async function dailyHealth(base, now = Date.now()) {
     bad.length ? `Checks failing:\n${bad.map((h) => `  ❌ ${h.name}: ${h.detail}`).join('\n')}` : 'All data checks: ✅',
     m.filledFromNse?.length ? `Filled from NSE (Yahoo was late): ${m.filledFromNse.length}` : null,
     `Fundamentals: ${fund?.asOf ? `${fund.ok} stocks, ${fundAge} h old${fundAge > 30 ? ' ⚠️' : ''}` : 'missing ⚠️'}`,
+    scanLine,
   ].filter(Boolean).join('\n');
   const r = await sendTelegram(text, ownerChat());
   await tokenWarning(now).catch(() => {});

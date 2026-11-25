@@ -655,7 +655,7 @@ test('watch + scan: baseline, new match alert, no repeat, edited screen re-basel
   await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Renamed' } });
   const rm = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Pullback Cheap' } });
   assert.equal(rm.json.screens.length, 0);
-  assert.equal(telegrams.length, 1);
+  assert.equal(telegrams.filter((t) => t.startsWith('📡')).length, 1, 'one alert; anything else is an owner warning');
 
   delete process.env.UPSTASH_REDIS_REST_URL;
   delete process.env.UPSTASH_REDIS_REST_TOKEN;

@@ -169,39 +169,67 @@ export async function loadWatch() {
     .filter(Boolean);
 }
 
+// Every source is fetched in parallel and each alert type stands alone, so one slow or failed
+// source (Yahoo intraday, the data file, Upstox futures) never holds back the others.
 export async function runScan(base, now = Date.now()) {
-  const screens = await loadWatch();
-  const summary = { at: new Date(now).toISOString(), screens: screens.length, alerts: 0, sent: 0, held: 0, source: null, notes: [] };
-  {
-    const [latest, fund, config] = await Promise.all([
-      getJson(`${base}/data/latest.json`),
-      getJson(`${base}/data/fundamentals.json`).catch(() => null),
-      getJson(`${base}/config.json`).catch(() => null),
-    ]);
-    let live = null;
-    let rawQuotes = null;
-    try {
-      const q = await liveQuotes();
-      rawQuotes = q.quotes;
-      live = { quotes: shape(q.quotes, q.asOf), indices: shape(q.indices, q.asOf) };
-      summary.source = q.source || 'yahoo';
-      if (summary.source !== 'upstox') await ownerOnce('upstox-down', `⚠️ Upstox is not answering; live prices come from Yahoo (backup).\n${q.fallbackReason || ''}`.trim(), now).catch(() => {});
-    } catch (e) {
-      summary.notes.push(`no live prices: ${e.message}`);
-    }
-    let intra = null;
-    try {
-      intra = await getIntraday();
-    } catch (e) {
-      summary.notes.push(`no intraday layer: ${e.message}`);
-    }
-    if (sessionToday(intra, now) === false) {
-      summary.noSession = true; // NSE holiday: keep the baseline as it is
-    } else {
-      let rows = buildRows(latest, live, intra, config?.screener || {}, fund?.stocks);
-      const lastMap = pairsToObject(await redis('HGETALL', 'lens:last'));
-      let { alerts, nextLast } = diffScreens(rows, screens, lastMap);
-      const candidates = [...new Set(alerts.flatMap((a) => a.items.map((i) => i.s)))];
+  const started = Date.now();
+  const summary = { at: new Date(now).toISOString(), screens: 0, alerts: 0, sent: 0, held: 0, source: null, notes: [] };
+  const val = (r) => (r.status === 'fulfilled' ? r.value : null);
+  const why = (r) => (r.status === 'rejected' ? r.reason?.message || String(r.reason) : null);
+  const [screensR, latestR, fundR, configR, quotesR, intraR, futR, lastR, activeR, futLastR] = await Promise.allSettled([
+    loadWatch(),
+    getJson(`${base}/data/latest.json`),
+    getJson(`${base}/data/fundamentals.json`),
+    getJson(`${base}/config.json`),
+    liveQuotes(),
+    getIntraday(),
+    liveFutures(process.env.UPSTOX_ANALYTICS_TOKEN, now),
+    redis('HGETALL', 'lens:last'),
+    redis('GET', 'active:last'),
+    redis('GET', 'futactive:last'),
+  ]);
+  const screens = val(screensR) || [];
+  summary.screens = screens.length;
+  const latest = val(latestR);
+  const intra = val(intraR);
+  if (!latest) summary.notes.push(`data file: ${why(latestR)}`);
+  if (!intra) summary.notes.push(`intraday: ${why(intraR)}`);
+
+  let live = null;
+  let rawQuotes = null;
+  const q = val(quotesR);
+  if (q) {
+    rawQuotes = q.quotes;
+    live = { quotes: shape(q.quotes, q.asOf), indices: shape(q.indices, q.asOf) };
+    summary.source = q.source || 'yahoo';
+    if (summary.source !== 'upstox') await ownerOnce('upstox-down', `⚠️ Upstox is not answering; live prices come from Yahoo (backup).\n${q.fallbackReason || ''}`.trim(), now).catch(() => {});
+  } else summary.notes.push(`live prices: ${why(quotesR)}`);
+
+  if (sessionToday(intra, now) === false) {
+    summary.noSession = true; // NSE holiday: keep the baselines as they are
+  } else {
+    const day = istDay(now);
+    const alerts = [];
+    const writes = [];
+
+    const futs = val(futR);
+    if (futs) {
+      const fut = diffTop(futuresList(futs), val(futLastR), day);
+      writes.push(['SET', 'futactive:last', fut.next]);
+      if (fut.items.length) alerts.push({ screen: FUT_SCREEN, detail: `New in the top ${ACTIVE_TOP} near-month futures by value traded today`, items: fut.items });
+    } else if (process.env.UPSTOX_ANALYTICS_TOKEN) summary.notes.push(`futures: ${why(futR)}`);
+
+    if (latest) {
+      let rows = buildRows(latest, live, intra, val(configR)?.screener || {}, val(fundR)?.stocks);
+
+      const active = diffActive(withLiveTurnover(rows, rawQuotes), val(activeR), day);
+      writes.push(['SET', 'active:last', active.next]);
+      if (active.items.length) alerts.push({ screen: ACTIVE_SCREEN, detail: `New in the top ${ACTIVE_TOP} by value traded today`, items: active.items });
+
+      const lastMap = pairsToObject(val(lastR));
+      let { alerts: screenAlerts, nextLast } = diffScreens(rows, screens, lastMap);
+      const toTelegram = new Set(screens.filter(telegramScreen).map((sc) => sc.name));
+      const candidates = [...new Set(screenAlerts.filter((a) => toTelegram.has(a.screen)).flatMap((a) => a.items.map((i) => i.s)))];
       if (candidates.length && summary.source === 'upstox') {
         try {
           const gaps = divergent(live.quotes, await yahooQuotesFor(candidates, now), now);
@@ -209,7 +237,7 @@ export async function runScan(base, now = Date.now()) {
             const held = new Set(gaps.map((g) => g.s));
             summary.held = held.size;
             rows = rows.filter((r) => !held.has(r.s));
-            ({ alerts, nextLast } = diffScreens(rows, screens, lastMap));
+            ({ alerts: screenAlerts, nextLast } = diffScreens(rows, screens, lastMap));
             const lines = gaps.slice(0, 10).map((g) => `• ${g.s}: Upstox ${g.upstox} vs Yahoo ${g.yahoo} (${g.gap}%)`);
             await ownerOnce(`gap:${gaps.map((g) => g.s).sort().join(',')}`, `⚠️ Price check: alert held back, sources disagree by more than ${CROSS_CHECK_PCT}%\n${lines.join('\n')}`, now).catch(() => {});
           }
@@ -217,39 +245,28 @@ export async function runScan(base, now = Date.now()) {
           summary.notes.push(`cross-check skipped: ${e.message}`);
         }
       }
-      const lastWrite = [['DEL', 'lens:last']];
-      if (Object.keys(nextLast).length) lastWrite.push(['HSET', 'lens:last', ...Object.entries(nextLast).flat()]);
-      await pipeline(lastWrite);
-      const toTelegram = new Set(screens.filter(telegramScreen).map((sc) => sc.name));
+      writes.push(['DEL', 'lens:last']);
+      if (Object.keys(nextLast).length) writes.push(['HSET', 'lens:last', ...Object.entries(nextLast).flat()]);
+      alerts.push(...screenAlerts.filter((a) => toTelegram.has(a.screen)));
+    }
 
-      const active = diffActive(withLiveTurnover(rows, rawQuotes), await redis('GET', 'active:last'), istDay(now));
-      await redis('SET', 'active:last', active.next);
-      if (active.items.length) {
-        toTelegram.add(ACTIVE_SCREEN);
-        alerts.push({ screen: ACTIVE_SCREEN, detail: `New in the top ${ACTIVE_TOP} by value traded today`, items: active.items });
-      }
-
-      try {
-        const fut = diffTop(futuresList(await liveFutures(process.env.UPSTOX_ANALYTICS_TOKEN, now)), await redis('GET', 'futactive:last'), istDay(now));
-        await redis('SET', 'futactive:last', fut.next);
-        if (fut.items.length) {
-          toTelegram.add(FUT_SCREEN);
-          alerts.push({ screen: FUT_SCREEN, detail: `New in the top ${ACTIVE_TOP} near-month futures by value traded today`, items: fut.items });
-        }
-      } catch (e) {
-        summary.notes.push(`futures: ${e.message}`);
-      }
-
-      for (const a of alerts) {
-        if (!toTelegram.has(a.screen)) continue;
+    await Promise.all([
+      writes.length ? pipeline(writes) : null,
+      ...alerts.map(async (a) => {
         summary.alerts += a.items.length;
         const r = await deliver(a.screen, a.items, a.detail, true);
         summary.sent += r.sent;
         if (!r.ok) summary.notes.push(`telegram: ${r.reason}`);
-      }
-    }
+      }),
+    ]);
   }
+  summary.ms = Date.now() - started;
   await redis('SET', 'scan:last', JSON.stringify(summary));
+  // the owner hears about a broken source once a day per source, not every minute
+  for (const n of summary.notes) {
+    const src = n.split(':')[0];
+    if (['data file', 'live prices', 'futures', 'telegram'].includes(src)) await ownerOnce(`scan:${src}`, `⚠️ Alert scanner: ${n}`, now).catch(() => {});
+  }
   return summary;
 }
 
