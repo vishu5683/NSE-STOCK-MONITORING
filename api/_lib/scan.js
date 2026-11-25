@@ -82,6 +82,29 @@ export function diffScreens(rows, screens, lastMap) {
   return { alerts, nextLast };
 }
 
+// Most Active Equities (NSE Market Data page): top stocks by value traded today. A stock that newly
+// enters the top list is sent to Telegram; the first scan of the day only sets the baseline.
+export const ACTIVE_SCREEN = 'Most Active Equities';
+export const ACTIVE_TOP = 10;
+
+export function diffActive(rows, prevJson, day) {
+  const top = rows
+    .filter((r) => Number.isFinite(r.dayValueCr) && r.dayValueCr > 0)
+    .sort((a, b) => b.dayValueCr - a.dayValueCr)
+    .slice(0, ACTIVE_TOP);
+  const next = JSON.stringify({ day, syms: top.map((r) => r.s) });
+  let prev = null;
+  try {
+    prev = prevJson ? JSON.parse(prevJson) : null;
+  } catch {
+    prev = null;
+  }
+  if (!prev || prev.day !== day) return { items: [], next };
+  const before = new Set(prev.syms);
+  const items = top.filter((r) => !before.has(r.s)).map((r) => ({ s: r.s, k: 'new', p: r.ltp ?? null, c: r.chg ?? null }));
+  return { items, next };
+}
+
 // Upstox price vs a fresh Yahoo price for the symbols about to be alerted. A gap above
 // CROSS_CHECK_PCT holds that alert back (it is re-checked on the next scan).
 export function divergent(liveQuotesMap, yahoo, now = Date.now()) {
@@ -125,7 +148,7 @@ export async function loadWatch() {
 export async function runScan(base, now = Date.now()) {
   const screens = await loadWatch();
   const summary = { at: new Date(now).toISOString(), screens: screens.length, alerts: 0, sent: 0, held: 0, source: null, notes: [] };
-  if (screens.length) {
+  {
     const [latest, fund, config] = await Promise.all([
       getJson(`${base}/data/latest.json`),
       getJson(`${base}/data/fundamentals.json`).catch(() => null),
@@ -168,8 +191,18 @@ export async function runScan(base, now = Date.now()) {
           summary.notes.push(`cross-check skipped: ${e.message}`);
         }
       }
-      await pipeline([['DEL', 'lens:last'], ['HSET', 'lens:last', ...Object.entries(nextLast).flat()]]);
+      const lastWrite = [['DEL', 'lens:last']];
+      if (Object.keys(nextLast).length) lastWrite.push(['HSET', 'lens:last', ...Object.entries(nextLast).flat()]);
+      await pipeline(lastWrite);
       const toTelegram = new Set(screens.filter(telegramScreen).map((sc) => sc.name));
+
+      const active = diffActive(rows, await redis('GET', 'active:last'), istDay(now));
+      await redis('SET', 'active:last', active.next);
+      if (active.items.length) {
+        toTelegram.add(ACTIVE_SCREEN);
+        alerts.push({ screen: ACTIVE_SCREEN, detail: `New in the top ${ACTIVE_TOP} by value traded today`, items: active.items });
+      }
+
       for (const a of alerts) {
         if (!toTelegram.has(a.screen)) continue;
         summary.alerts += a.items.length;

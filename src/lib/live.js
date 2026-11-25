@@ -46,7 +46,7 @@ export function applyBook(data, live) {
 
 // Overlay the server's live intraday layer (/api/intraday) on the rows: 5-minute EMA / RSI / MACD, VWAP,
 // opening range, day open, previous session and CPR. Daily indicators and NSE end-of-day data stay from the file.
-const IND_KEYS = ['stDir', 'stLine', 'bbUp', 'bbMid', 'bbLow', 'bbPctB', 'stochK', 'stochD', 'rsi15', 'ema9i', 'ema15i', 'rsiI', 'macdI', 'macdIsig', 'vwap', 'dayOpen', 'orbHigh', 'orbLow', 'iBars', 'pdh', 'pdl', 'pdc', 'cprPivot', 'cprBc', 'cprTc', 'cprWidthPct', 'ema21i', 'ema50i', 'adxI', 'atrI', 'crossAgo', 'vol5m', 'vol5mAvg', 'vol5mX'];
+const IND_KEYS = ['stDir', 'stLine', 'bbUp', 'bbMid', 'bbLow', 'bbPctB', 'stochK', 'stochD', 'rsi15', 'ema9i', 'ema15i', 'rsiI', 'macdI', 'macdIsig', 'vwap', 'dayOpen', 'orbHigh', 'orbLow', 'iBars', 'pdh', 'pdl', 'pdc', 'cprPivot', 'cprBc', 'cprTc', 'cprWidthPct', 'ema21i', 'ema50i', 'adxI', 'atrI', 'crossAgo', 'vol5m', 'vol5mAvg', 'vol5mX', 'dayValueCr'];
 const IND_TEXT_KEYS = ['trend15', 'smcZone', 'crossDir', 'candleAt'];
 const istStamp = (iso) => {
   const d = new Date(new Date(iso).getTime() + 330 * 60000);

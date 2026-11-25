@@ -818,3 +818,19 @@ test('intraday layer: ADX, 9/21 cross, SMC zone and the 10-session 5-minute volu
   ];
   assert.equal(intradayLib.smcZone(ob, 1.5), 'DEMAND');
 });
+
+test('Most Active: first scan of the day is the baseline, a new top-10 entry alerts, telegram screen filter', () => {
+  const rows = (vals) => vals.map((v, i) => ({ s: `S${i}`, ltp: 100 + i, chg: 1, dayValueCr: v }));
+  const day = '2026-11-26';
+  const base = scanLib.diffActive(rows([50, 40, 30, 20, 10, 9, 8, 7, 6, 5, 4, 3]), null, day);
+  assert.equal(base.items.length, 0, 'no previous list: baseline only');
+  assert.deepEqual(JSON.parse(base.next).syms, ['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9']);
+  const moved = scanLib.diffActive(rows([50, 40, 30, 20, 10, 9, 8, 7, 6, 5, 4, 60]), base.next, day);
+  assert.deepEqual(moved.items.map((i) => i.s), ['S11'], 'S11 jumps into the top 10');
+  assert.equal(scanLib.diffActive(rows([1, 2]), base.next, '2026-11-27').items.length, 0, 'new day: baseline again');
+  assert.equal(scanLib.diffActive([{ s: 'X', valueCr: 999 }], base.next, day).items.length, 0, 'previous-day turnover is not used');
+
+  assert.equal(scanLib.telegramScreen({ name: 'My pullback', conditions: [] }), true);
+  assert.equal(scanLib.telegramScreen({ name: 'Renamed', conditions: [{ field: 'vs200', op: '>', value: '0' }, { field: 'vsVwap', op: '>', value: '0' }, { field: 'volLakh', op: '>', value: '15' }] }), true);
+  assert.equal(scanLib.telegramScreen({ name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '1' }] }), false);
+});

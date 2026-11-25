@@ -267,8 +267,11 @@ export function indicatorsFrom(bars, { index = false, now = Date.now() } = {}) {
   if (todayBars.length) {
     const vol = todayBars.reduce((a, b) => a + (b.v > 0 ? b.v : 0), 0);
     const typ = (b) => (b.h + b.l + b.c) / 3;
-    if (!index && vol > 0) out.vwap = r2(todayBars.reduce((a, b) => a + typ(b) * (b.v > 0 ? b.v : 0), 0) / vol);
-    else {
+    if (!index && vol > 0) {
+      const traded = todayBars.reduce((a, b) => a + typ(b) * (b.v > 0 ? b.v : 0), 0);
+      out.vwap = r2(traded / vol);
+      out.dayValueCr = r2(traded / 1e7); // value traded so far today, for Most Active
+    } else {
       out.vwap = r2(todayBars.reduce((a, b) => a + typ(b), 0) / todayBars.length);
       out.vwapProxy = true; // indices have no traded volume on Yahoo
     }

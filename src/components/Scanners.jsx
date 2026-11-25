@@ -43,6 +43,9 @@ import { fetchChainLive } from '../lib/liveApi.js';
 import { dispatchAlerts } from '../lib/alerts.js';
 import { useAlertPref } from '../lib/alertPrefs.js';
 
+// Value traded so far today from the live 5-minute layer; the daily file's figure before that.
+const turnover = (r) => r.dayValueCr ?? r.valueCr;
+
 // Same tabs, same order as the client's Google Sheet.
 const VIEWS = [
   { id: 'setups', label: 'Profitable Setups', icon: '💎', desc: 'Ranked bullish and bearish setups with ATM strike, entry, stop loss and targets.' },
@@ -333,7 +336,7 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
 
   // one pass: every tab reads from the same enriched row
   const enriched = useMemo(() => {
-    const byTurnover = [...rows].sort((a, b) => (b.valueCr ?? -1) - (a.valueCr ?? -1)).map((r) => r.s);
+    const byTurnover = [...rows].sort((a, b) => (turnover(b) ?? -1) - (turnover(a) ?? -1)).map((r) => r.s);
     const turnRank = new Map(byTurnover.map((s, i) => [s, i + 1]));
     return rows.map((r) => {
       const intra = intradaySignal(r, c);
@@ -477,7 +480,7 @@ export default function Scanners({ rows, indices, sectors, settings, onOpen, onS
               SEC,
               LTP,
               CHG,
-              { label: 'Turnover (Cr)', x: (r) => r.valueCr, cell: (r) => dec(r.valueCr, 1), cls: 'num' },
+              { label: 'Turnover (Cr)', x: (r) => turnover(r), cell: (r) => dec(turnover(r), 1), cls: 'num' },
               { label: 'Volume', x: (r) => r.volume, cell: (r) => compact(r.volume), cls: 'num', hide: 'sm' },
               { label: 'Vol Spike', x: (r) => r.volSpike, cell: (r) => <span className={r.volSpike >= c.volSpike ? 'up-t' : ''}>{mult(r.volSpike)}</span>, cls: 'num', hide: 'sm' },
               { label: '20D Avg Vol', x: (r) => r.avgVol20, cell: (r) => compact(r.avgVol20), cls: 'num', hide: 'md' },
