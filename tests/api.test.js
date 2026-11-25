@@ -819,16 +819,25 @@ test('intraday layer: ADX, 9/21 cross, SMC zone and the 10-session 5-minute volu
   assert.equal(intradayLib.smcZone(ob, 1.5), 'DEMAND');
 });
 
-test('Most Active: first scan of the day is the baseline, a new top-10 entry alerts, telegram screen filter', () => {
+test('Most Active: first scan of the day is the baseline, a new top-15 entry alerts, live Upstox volume, telegram screen filter', () => {
   const rows = (vals) => vals.map((v, i) => ({ s: `S${i}`, ltp: 100 + i, chg: 1, dayValueCr: v }));
   const day = '2026-11-26';
-  const base = scanLib.diffActive(rows([50, 40, 30, 20, 10, 9, 8, 7, 6, 5, 4, 3]), null, day);
+  const vals = [90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5];
+  const base = scanLib.diffActive(rows(vals), null, day);
   assert.equal(base.items.length, 0, 'no previous list: baseline only');
-  assert.deepEqual(JSON.parse(base.next).syms, ['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9']);
-  const moved = scanLib.diffActive(rows([50, 40, 30, 20, 10, 9, 8, 7, 6, 5, 4, 60]), base.next, day);
-  assert.deepEqual(moved.items.map((i) => i.s), ['S11'], 'S11 jumps into the top 10');
+  assert.equal(JSON.parse(base.next).syms.length, 15);
+  assert.deepEqual(JSON.parse(base.next).syms.slice(-1), ['S14']);
+  const jump = [...vals.slice(0, 17), 100];
+  const moved = scanLib.diffActive(rows(jump), base.next, day);
+  assert.deepEqual(moved.items.map((i) => i.s), ['S17'], 'S17 jumps into the top 15');
   assert.equal(scanLib.diffActive(rows([1, 2]), base.next, '2026-11-27').items.length, 0, 'new day: baseline again');
   assert.equal(scanLib.diffActive([{ s: 'X', valueCr: 999 }], base.next, day).items.length, 0, 'previous-day turnover is not used');
+
+  // Upstox day volume x VWAP wins over the 5-minute figure
+  const live = scanLib.withLiveTurnover([{ s: 'A', vwap: 200, ltp: 210, dayValueCr: 1 }, { s: 'B', ltp: 50, dayValueCr: 7 }], { A: { ltp: 210, vol: 5_000_000 } });
+  assert.equal(live[0].liveValueCr, 100, '200 x 50 lakh = 100 Cr');
+  assert.equal(scanLib.turnoverNow(live[0]), 100);
+  assert.equal(scanLib.turnoverNow(live[1]), 7, 'no live volume: 5-minute figure');
 
   assert.equal(scanLib.telegramScreen({ name: 'My pullback', conditions: [] }), true);
   assert.equal(scanLib.telegramScreen({ name: 'Renamed', conditions: [{ field: 'vs200', op: '>', value: '0' }, { field: 'vsVwap', op: '>', value: '0' }, { field: 'volLakh', op: '>', value: '15' }] }), true);

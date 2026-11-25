@@ -84,13 +84,23 @@ export function diffScreens(rows, screens, lastMap) {
 
 // Most Active Equities (NSE Market Data page): top stocks by value traded today. A stock that newly
 // enters the top list is sent to Telegram; the first scan of the day only sets the baseline.
+// liveValueCr (Upstox day volume x VWAP) moves every scan; dayValueCr from the 5-minute bars is the fallback.
+export const turnoverNow = (r) => (Number.isFinite(r.liveValueCr) ? r.liveValueCr : r.dayValueCr);
+
+export function withLiveTurnover(rows, quotes) {
+  return rows.map((r) => {
+    const vol = quotes?.[r.s]?.vol;
+    const px = r.vwap || r.ltp;
+    return vol > 0 && px > 0 ? { ...r, liveValueCr: Math.round((px * vol) / 1e5) / 100 } : r;
+  });
+}
 export const ACTIVE_SCREEN = 'Most Active Equities';
-export const ACTIVE_TOP = 10;
+export const ACTIVE_TOP = 15;
 
 export function diffActive(rows, prevJson, day) {
   const top = rows
-    .filter((r) => Number.isFinite(r.dayValueCr) && r.dayValueCr > 0)
-    .sort((a, b) => b.dayValueCr - a.dayValueCr)
+    .filter((r) => turnoverNow(r) > 0)
+    .sort((a, b) => turnoverNow(b) - turnoverNow(a))
     .slice(0, ACTIVE_TOP);
   const next = JSON.stringify({ day, syms: top.map((r) => r.s) });
   let prev = null;
@@ -155,8 +165,10 @@ export async function runScan(base, now = Date.now()) {
       getJson(`${base}/config.json`).catch(() => null),
     ]);
     let live = null;
+    let rawQuotes = null;
     try {
       const q = await liveQuotes();
+      rawQuotes = q.quotes;
       live = { quotes: shape(q.quotes, q.asOf), indices: shape(q.indices, q.asOf) };
       summary.source = q.source || 'yahoo';
       if (summary.source !== 'upstox') await ownerOnce('upstox-down', `⚠️ Upstox is not answering; live prices come from Yahoo (backup).\n${q.fallbackReason || ''}`.trim(), now).catch(() => {});
@@ -196,7 +208,7 @@ export async function runScan(base, now = Date.now()) {
       await pipeline(lastWrite);
       const toTelegram = new Set(screens.filter(telegramScreen).map((sc) => sc.name));
 
-      const active = diffActive(rows, await redis('GET', 'active:last'), istDay(now));
+      const active = diffActive(withLiveTurnover(rows, rawQuotes), await redis('GET', 'active:last'), istDay(now));
       await redis('SET', 'active:last', active.next);
       if (active.items.length) {
         toTelegram.add(ACTIVE_SCREEN);
