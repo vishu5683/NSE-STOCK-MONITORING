@@ -11,6 +11,7 @@ import { applyBook, applyIntraday } from '../../src/lib/live.js';
 import { analyseAll } from '../../src/lib/signals.js';
 import { runQuery, queryText, FIELD_BY_KEY, OPS, PRESETS } from '../../src/lib/lens.js';
 import { liveQuotes } from '../quotes.js';
+import { liveFutures } from './upstoxOi.js';
 import { getIntraday } from './intraday.js';
 import { yahooQuotesFor } from './yahoo.js';
 import { redis, pipeline, pairsToObject } from './redis.js';
@@ -97,12 +98,10 @@ export function withLiveTurnover(rows, quotes) {
 export const ACTIVE_SCREEN = 'Most Active Equities';
 export const ACTIVE_TOP = 15;
 
-export function diffActive(rows, prevJson, day) {
-  const top = rows
-    .filter((r) => turnoverNow(r) > 0)
-    .sort((a, b) => turnoverNow(b) - turnoverNow(a))
-    .slice(0, ACTIVE_TOP);
-  const next = JSON.stringify({ day, syms: top.map((r) => r.s) });
+// Pure: top ACTIVE_TOP of list by value, and which names are new since the last scan today.
+export function diffTop(list, prevJson, day) {
+  const top = list.filter((x) => x.value > 0).sort((a, b) => b.value - a.value).slice(0, ACTIVE_TOP);
+  const next = JSON.stringify({ day, syms: top.map((x) => x.s) });
   let prev = null;
   try {
     prev = prevJson ? JSON.parse(prevJson) : null;
@@ -111,8 +110,23 @@ export function diffActive(rows, prevJson, day) {
   }
   if (!prev || prev.day !== day) return { items: [], next };
   const before = new Set(prev.syms);
-  const items = top.filter((r) => !before.has(r.s)).map((r) => ({ s: r.s, k: 'new', p: r.ltp ?? null, c: r.chg ?? null }));
+  const items = top.filter((x) => !before.has(x.s)).map((x) => ({ s: x.s, k: 'new', p: x.p ?? null, c: x.c ?? null }));
   return { items, next };
+}
+
+export const diffActive = (rows, prevJson, day) =>
+  diffTop(rows.map((r) => ({ s: r.s, value: turnoverNow(r), p: r.ltp, c: r.chg })), prevJson, day);
+
+// Most Active Future Contracts: near-month futures by value traded today (price x quantity).
+export const FUT_SCREEN = 'Most Active Future Contracts';
+
+export function futuresList(futs) {
+  return Object.entries(futs || {}).map(([name, f]) => ({
+    s: `${name} FUT`,
+    value: f.futLive > 0 && f.futVolLive > 0 ? (f.futLive * f.futVolLive) / 1e7 : 0,
+    p: f.futLive,
+    c: f.futCp > 0 ? Math.round((f.futLive / f.futCp - 1) * 10000) / 100 : null,
+  }));
 }
 
 // Upstox price vs a fresh Yahoo price for the symbols about to be alerted. A gap above
@@ -213,6 +227,17 @@ export async function runScan(base, now = Date.now()) {
       if (active.items.length) {
         toTelegram.add(ACTIVE_SCREEN);
         alerts.push({ screen: ACTIVE_SCREEN, detail: `New in the top ${ACTIVE_TOP} by value traded today`, items: active.items });
+      }
+
+      try {
+        const fut = diffTop(futuresList(await liveFutures(process.env.UPSTOX_ANALYTICS_TOKEN, now)), await redis('GET', 'futactive:last'), istDay(now));
+        await redis('SET', 'futactive:last', fut.next);
+        if (fut.items.length) {
+          toTelegram.add(FUT_SCREEN);
+          alerts.push({ screen: FUT_SCREEN, detail: `New in the top ${ACTIVE_TOP} near-month futures by value traded today`, items: fut.items });
+        }
+      } catch (e) {
+        summary.notes.push(`futures: ${e.message}`);
       }
 
       for (const a of alerts) {

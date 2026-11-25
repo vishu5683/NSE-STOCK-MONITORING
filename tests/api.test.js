@@ -843,3 +843,18 @@ test('Most Active: first scan of the day is the baseline, a new top-15 entry ale
   assert.equal(scanLib.telegramScreen({ name: 'Renamed', conditions: [{ field: 'vs200', op: '>', value: '0' }, { field: 'vsVwap', op: '>', value: '0' }, { field: 'volLakh', op: '>', value: '15' }] }), true);
   assert.equal(scanLib.telegramScreen({ name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '1' }] }), false);
 });
+
+test('Most Active Future Contracts: value = price x quantity, top 15, new entry alerts', () => {
+  const futs = Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`N${i}`, { futLive: 100, futVolLive: (16 - i) * 1e6, futCp: 98 }]));
+  const list = scanLib.futuresList(futs);
+  assert.equal(list[0].s, 'N0 FUT');
+  assert.equal(list[0].value, 160, '100 x 1.6 crore qty = 160 Cr');
+  assert.equal(list[0].c, 2.04);
+  const day = '2026-11-26';
+  const base = scanLib.diffTop(list, null, day);
+  assert.equal(JSON.parse(base.next).syms.length, 15);
+  futs.N15.futVolLive = 50e6;
+  const moved = scanLib.diffTop(scanLib.futuresList(futs), base.next, day);
+  assert.deepEqual(moved.items.map((i) => i.s), ['N15 FUT']);
+  assert.equal(scanLib.futuresList({ X: { futLive: 0, futVolLive: 5 } })[0].value, 0);
+});

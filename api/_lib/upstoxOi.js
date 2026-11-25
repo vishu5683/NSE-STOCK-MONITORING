@@ -184,6 +184,12 @@ async function futuresQuotes(names, today, token) {
   return out;
 }
 
+// Near-month futures of every F&O name in one or two quote calls (Most Active Future Contracts alert).
+export async function liveFutures(token, now = Date.now()) {
+  if (!token) throw new OiError('NOT_CONFIGURED', 'UPSTOX_ANALYTICS_TOKEN is not set.');
+  return futuresQuotes(Object.keys(instruments.fo || {}), istToday(now), token);
+}
+
 let cache = null;
 let inflight = null;
 
