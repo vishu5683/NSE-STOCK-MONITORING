@@ -13,6 +13,9 @@ export default async function handler(req, res) {
   if (parsed.error) return send(res, 400, { error: parsed.error });
   if (!allowRate(clientIp(req))) return send(res, 429, { ok: false, reason: 'RATE_LIMITED' });
 
+  // Telegram alerts come only from the server scanner (one source, live data, no duplicates when
+  // a browser has the same screen open). The browser keeps its in-app alerts.
+  if (process.env.BROWSER_TELEGRAM !== 'on') return send(res, 200, { ok: true, sent: 0, skipped: 'SERVER_SCANNER_ONLY' });
   const r = await deliver(parsed.screen, parsed.items);
   return send(res, r.ok ? 200 : 502, r);
 }

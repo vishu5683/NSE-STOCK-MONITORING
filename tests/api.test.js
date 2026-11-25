@@ -514,6 +514,12 @@ test('/api/telegram: server builds the text from known symbols, rejects free tex
   const foreign = await call(telegramApi, { method: 'POST', headers: { origin: 'https://evil.example', host: 'nse.example' }, body: { screen: 'Lens', items: [{ s: sym, k: 'new' }] } });
   assert.equal(foreign.status, 403);
 
+  // default: only the server scanner posts to Telegram
+  const off = await call(telegramApi, { method: 'POST', body: { screen: 'Pullback Stocks (Trend Continuation)', items: [{ s: sym, k: 'new' }] }, ip: '7.7.7.9' });
+  assert.equal(off.json.skipped, 'SERVER_SCANNER_ONLY');
+  assert.equal(calls.length, 0);
+  process.env.BROWSER_TELEGRAM = 'on';
+
   const r = await call(telegramApi, { method: 'POST', headers: { origin: 'https://nse.example', host: 'nse.example' }, body: { screen: 'Pullback Stocks (Trend Continuation)', items: [{ s: sym, k: 'new' }, { s: sym2, k: 'buy', p: 101.256 }] }, ip: '7.7.7.1' });
   assert.equal(r.json.ok, true);
   assert.equal(r.json.sent, 2);
@@ -541,6 +547,7 @@ test('/api/telegram: server builds the text from known symbols, rejects free tex
   let last;
   for (let i = 0; i < 11; i += 1) last = await call(telegramApi, { method: 'POST', body: { screen: `S${i}`, items: [{ s: sym, k: 'new' }] }, ip: '7.7.7.3' });
   assert.equal(last.status, 429);
+  delete process.env.BROWSER_TELEGRAM;
 });
 
 const { default: feedUrlApi } = await import('../api/feed-url.js');
