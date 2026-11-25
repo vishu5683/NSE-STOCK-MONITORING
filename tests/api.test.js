@@ -514,20 +514,26 @@ test('/api/telegram: server builds the text from known symbols, rejects free tex
   const foreign = await call(telegramApi, { method: 'POST', headers: { origin: 'https://evil.example', host: 'nse.example' }, body: { screen: 'Lens', items: [{ s: sym, k: 'new' }] } });
   assert.equal(foreign.status, 403);
 
-  const r = await call(telegramApi, { method: 'POST', headers: { origin: 'https://nse.example', host: 'nse.example' }, body: { screen: 'Momentum + Breakout', items: [{ s: sym, k: 'new' }, { s: sym2, k: 'buy', p: 101.256 }] }, ip: '7.7.7.1' });
+  const r = await call(telegramApi, { method: 'POST', headers: { origin: 'https://nse.example', host: 'nse.example' }, body: { screen: 'Pullback Stocks (Trend Continuation)', items: [{ s: sym, k: 'new' }, { s: sym2, k: 'buy', p: 101.256 }] }, ip: '7.7.7.1' });
   assert.equal(r.json.ok, true);
   assert.equal(r.json.sent, 2);
   assert.match(calls[0].url, /^https:\/\/api\.telegram\.org\/botbot-tok\/sendMessage$/);
   assert.equal(calls[0].body.chat_id, '123456');
   const lines = calls[0].body.text.split('\n');
-  assert.equal(lines[0], '📡 Momentum + Breakout');
+  assert.equal(lines[0], '📡 Pullback Stocks (Trend Continuation)');
   assert.equal(lines[1], `• ${sym}`);
   assert.equal(lines[2], `• ${sym2}: intraday BUY ₹101.26`);
   assert.match(lines[3], /^🕒 \d\d:\d\d IST$/);
 
   // same screen + symbol + kind again the same day (second tab, second viewer, flapping): not resent
-  const again = await call(telegramApi, { method: 'POST', body: { screen: 'Momentum + Breakout', items: [{ s: sym, k: 'new' }] }, ip: '7.7.7.2' });
+  const again = await call(telegramApi, { method: 'POST', body: { screen: 'Pullback Stocks (Trend Continuation)', items: [{ s: sym, k: 'new' }] }, ip: '7.7.7.2' });
   assert.equal(again.json.sent, 0);
+  assert.equal(calls.length, 1);
+
+  // only Pullback alerts reach the client chat
+  const other = await call(telegramApi, { method: 'POST', body: { screen: 'Momentum + Breakout', items: [{ s: sym2, k: 'new' }] }, ip: '7.7.7.2' });
+  assert.equal(other.json.ok, true);
+  assert.equal(other.json.sent, 0);
   assert.equal(calls.length, 1);
 
   // 10 calls a minute per address, then 429
@@ -614,20 +620,23 @@ test('watch + scan: baseline, new match alert, no repeat, edited screen re-basel
   const scan = () => run(lensApi, { url: '/api/lens?scan=1&force=1', headers: { authorization: 'Bearer cron-secret-123' } });
 
   assert.equal((await run(lensApi, { url: '/api/lens?scan=1&force=1' })).status, 401, 'scanner needs the cron secret');
-  const bad = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'nope', op: '<', value: '1' }] } });
+  const bad = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Pullback Cheap', conditions: [{ field: 'nope', op: '<', value: '1' }] } });
   assert.equal(bad.status, 400);
-  const add = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '150' }] } });
+  const add = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Pullback Cheap', conditions: [{ field: 'ltp', op: '<', value: '150' }] } });
   assert.equal(add.status, 200);
-  assert.equal(add.json.screens[0].name, 'Cheap');
+  assert.equal(add.json.screens[0].name, 'Pullback Cheap');
+
+  await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Other', conditions: [{ field: 'ltp', op: '<', value: '150' }] } });
+  await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Renamed', conditions: [{ field: 'vs200', op: '>', value: '0' }, { field: 'vsVwap', op: '>', value: '0' }, { field: 'volLakh', op: '>', value: '15' }] } });
 
   const s1 = await scan();
   assert.equal(s1.status, 200);
   assert.equal(s1.json.alerts, 0, 'first scan only sets the baseline');
   ltp = 100;
   const s2 = await scan();
-  assert.equal(s2.json.sent, 1);
-  assert.deepEqual(telegrams.at(-1).split('\n').slice(0, 3), ['📡 Cheap', 'LTP < 150', `• ${sym} ₹100.00`]);
-  assert.equal(up.hashes.get(`alert:count:${telegramLib.istDay()}`)?.get('Cheap'), '1', 'counted for the day summary');
+  assert.equal(s2.json.sent, 1, 'Other matches too but is not a Pullback screen: not sent');
+  assert.deepEqual(telegrams.at(-1).split('\n').slice(0, 3), ['📡 Pullback Cheap', 'LTP < 150', `• ${sym} ₹100.00`]);
+  assert.equal(up.hashes.get(`alert:count:${telegramLib.istDay()}`)?.get('Pullback Cheap'), '1', 'counted for the day summary');
   const s3 = await scan();
   assert.equal(s3.json.sent, 0, 'still matching: no repeat');
 
@@ -636,13 +645,15 @@ test('watch + scan: baseline, new match alert, no repeat, edited screen re-basel
   assert.equal((await scan()).json.sent, 0);
 
   // editing the watched screen re-baselines instead of alerting
-  await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Cheap', conditions: [{ field: 'ltp', op: '<', value: '120' }] } });
+  await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Pullback Cheap', conditions: [{ field: 'ltp', op: '<', value: '120' }] } });
   assert.equal((await scan()).json.alerts, 0);
 
   const list = await run(lensApi, { headers: auth0 });
   assert.equal(list.json.configured, true);
   assert.ok(list.json.lastScan?.at);
-  const rm = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Cheap' } });
+  await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Other' } });
+  await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Renamed' } });
+  const rm = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Pullback Cheap' } });
   assert.equal(rm.json.screens.length, 0);
   assert.equal(telegrams.length, 1);
 
@@ -747,6 +758,12 @@ test('daily messages: open, close summary, health report', async () => {
   };
   try {
     up.hashes.set('lens:watch', new Map([['Pullback', JSON.stringify({ name: 'Pullback', conditions: [{ field: 'ltp', op: '>', value: '1' }] })]]));
+    const n0 = sent.length;
+    assert.equal((await daily.dailyOpen()).skipped, 'DAILY_MESSAGES off');
+    assert.equal((await daily.dailyClose()).skipped, 'DAILY_MESSAGES off');
+    assert.equal(sent.length, n0, 'client chat gets Pullback alerts only');
+
+    process.env.DAILY_MESSAGES = 'on';
     const o = await daily.dailyOpen();
     assert.equal(o.ok, true);
     assert.equal(sent.at(-1)[0], '111');
@@ -770,6 +787,7 @@ test('daily messages: open, close summary, health report', async () => {
     delete process.env.UPSTASH_REDIS_REST_URL;
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
     delete process.env.TELEGRAM_OWNER_CHAT_ID;
+    delete process.env.DAILY_MESSAGES;
   }
 });
 

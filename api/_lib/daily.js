@@ -35,7 +35,15 @@ async function tokenWarning(now) {
   }
 }
 
+// The client chat gets Pullback alerts only, so open and close messages are switched off.
+// Set DAILY_MESSAGES=on in Vercel to send them again.
+const dailyMessagesOn = () => process.env.DAILY_MESSAGES === 'on';
+
 export async function dailyOpen(now = Date.now()) {
+  if (!dailyMessagesOn()) {
+    await tokenWarning(now).catch(() => {});
+    return { ok: true, skipped: 'DAILY_MESSAGES off' };
+  }
   const screens = await loadWatch();
   const trading = sessionToday(await getIntraday().catch(() => null), now);
   let source = null;
@@ -61,6 +69,7 @@ export async function dailyOpen(now = Date.now()) {
 }
 
 export async function dailyClose(now = Date.now()) {
+  if (!dailyMessagesOn()) return { ok: true, skipped: 'DAILY_MESSAGES off' };
   const trading = sessionToday(await getIntraday().catch(() => null), now);
   if (trading === false) return { ok: true, skipped: 'no session today' };
   const [screens, countsRaw] = await Promise.all([loadWatch(), redis('HGETALL', `alert:count:${istDay(now)}`)]);

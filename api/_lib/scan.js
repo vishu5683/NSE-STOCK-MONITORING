@@ -9,12 +9,12 @@
 
 import { applyBook, applyIntraday } from '../../src/lib/live.js';
 import { analyseAll } from '../../src/lib/signals.js';
-import { runQuery, queryText, FIELD_BY_KEY, OPS } from '../../src/lib/lens.js';
+import { runQuery, queryText, FIELD_BY_KEY, OPS, PRESETS } from '../../src/lib/lens.js';
 import { liveQuotes } from '../quotes.js';
 import { getIntraday } from './intraday.js';
 import { yahooQuotesFor } from './yahoo.js';
 import { redis, pipeline, pairsToObject } from './redis.js';
-import { cleanScreen, deliver, ownerOnce, istDay } from './telegram.js';
+import { cleanScreen, deliver, ownerOnce, istDay, isPullbackScreen } from './telegram.js';
 
 export const MAX_WATCH = 20;
 const MAX_CONDITIONS = 8;
@@ -39,6 +39,11 @@ export function parseScreen(body) {
 }
 
 export const screenKey = (sc) => `${sc.sector || ''}|${queryText(sc.conditions)}`;
+
+const PULLBACK_QUERY = queryText(PRESETS.find((p) => isPullbackScreen(p.name))?.conditions || []);
+
+// A watched screen counts as Pullback by its name, or by the preset's query under any name.
+export const telegramScreen = (sc) => isPullbackScreen(sc.name) || (PULLBACK_QUERY !== '' && queryText(sc.conditions) === PULLBACK_QUERY);
 
 const shape = (map, asOf) => Object.fromEntries(Object.entries(map || {}).map(([k, v]) => [k, { ltp: v.ltp, cp: v.cp, ts: v.t || asOf }]));
 
@@ -164,9 +169,11 @@ export async function runScan(base, now = Date.now()) {
         }
       }
       await pipeline([['DEL', 'lens:last'], ['HSET', 'lens:last', ...Object.entries(nextLast).flat()]]);
+      const toTelegram = new Set(screens.filter(telegramScreen).map((sc) => sc.name));
       for (const a of alerts) {
+        if (!toTelegram.has(a.screen)) continue;
         summary.alerts += a.items.length;
-        const r = await deliver(a.screen, a.items, a.detail);
+        const r = await deliver(a.screen, a.items, a.detail, true);
         summary.sent += r.sent;
         if (!r.ok) summary.notes.push(`telegram: ${r.reason}`);
       }

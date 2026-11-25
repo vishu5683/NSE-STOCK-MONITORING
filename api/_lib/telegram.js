@@ -120,8 +120,14 @@ export async function sendTelegram(text, chatId = mainChat()) {
   return { ok: true };
 }
 
+// The client chat gets Pullback alerts only (client's choice, 25-Nov-2026). Other screens and
+// panels still run in the app; they just do not post to Telegram.
+export const isPullbackScreen = (screen) => /pull\s*-?\s*back/i.test(String(screen || ''));
+
 // Dedupe, send in messages of at most 10 lines, count per screen for the day summary.
-export async function deliver(screen, items, detail = '') {
+// allowed: the caller has already matched the screen to the Pullback query (renamed screen).
+export async function deliver(screen, items, detail = '', allowed = false) {
+  if (!allowed && !isPullbackScreen(screen)) return { ok: true, sent: 0, skipped: 'NOT_PULLBACK' };
   const fresh = await freshItems(screen, items);
   let sent = 0;
   for (let i = 0; i < fresh.length; i += MAX_ITEMS) {
