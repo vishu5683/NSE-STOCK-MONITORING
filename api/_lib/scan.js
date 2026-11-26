@@ -43,6 +43,11 @@ export const screenKey = (sc) => `${sc.sector || ''}|${queryText(sc.conditions)}
 
 const PULLBACK_QUERY = queryText(PRESETS.find((p) => isPullbackScreen(p.name))?.conditions || []);
 
+// The Pullback alert runs from this fixed screen, not from the Lens watch list, so editing or
+// removing a watched screen in the browser cannot stop it.
+const PULLBACK_PRESET = PRESETS.find((p) => isPullbackScreen(p.name));
+export const PULLBACK_SCREEN = { name: PULLBACK_PRESET.name, sector: '', conditions: PULLBACK_PRESET.conditions.map((c) => ({ field: c.field, op: c.op, value: String(c.value) })) };
+
 // A watched screen counts as Pullback by its name, or by the preset's query under any name.
 export const telegramScreen = (sc) => isPullbackScreen(sc.name) || (PULLBACK_QUERY !== '' && queryText(sc.conditions) === PULLBACK_QUERY);
 
@@ -117,6 +122,19 @@ export function diffTop(list, prevJson, day) {
 export const diffActive = (rows, prevJson, day) =>
   diffTop(rows.map((r) => ({ s: r.s, value: turnoverNow(r), p: r.ltp, c: r.chg })), prevJson, day);
 
+// Volume Gainers (NSE Market Data page): today's volume against the 20-day average volume.
+// Only stocks trading at least VOLGAIN_MIN times their average are ranked.
+export const VOLGAIN_SCREEN = 'Volume Gainers';
+export const VOLGAIN_MIN = 2;
+
+export function volumeGainers(rows, quotes) {
+  return rows.map((r) => {
+    const vol = quotes?.[r.s]?.vol;
+    const ratio = vol > 0 && r.avgVol20 > 0 ? vol / r.avgVol20 : 0;
+    return { s: r.s, value: ratio >= VOLGAIN_MIN ? Math.round(ratio * 100) / 100 : 0, p: r.ltp, c: r.chg };
+  });
+}
+
 // Most Active Future Contracts: near-month futures by value traded today (price x quantity).
 export const FUT_SCREEN = 'Most Active Future Contracts';
 
@@ -176,7 +194,7 @@ export async function runScan(base, now = Date.now()) {
   const summary = { at: new Date(now).toISOString(), screens: 0, alerts: 0, sent: 0, held: 0, source: null, notes: [] };
   const val = (r) => (r.status === 'fulfilled' ? r.value : null);
   const why = (r) => (r.status === 'rejected' ? r.reason?.message || String(r.reason) : null);
-  const [screensR, latestR, fundR, configR, quotesR, intraR, futR, lastR, activeR, futLastR] = await Promise.allSettled([
+  const [, latestR, fundR, configR, quotesR, intraR, futR, lastR, activeR, futLastR, volR] = await Promise.allSettled([
     loadWatch(),
     getJson(`${base}/data/latest.json`),
     getJson(`${base}/data/fundamentals.json`),
@@ -187,8 +205,9 @@ export async function runScan(base, now = Date.now()) {
     redis('HGETALL', 'lens:last'),
     redis('GET', 'active:last'),
     redis('GET', 'futactive:last'),
+    redis('GET', 'volgain:last'),
   ]);
-  const screens = val(screensR) || [];
+  const screens = [PULLBACK_SCREEN];
   summary.screens = screens.length;
   const latest = val(latestR);
   const intra = val(intraR);
@@ -225,6 +244,12 @@ export async function runScan(base, now = Date.now()) {
       const active = diffActive(withLiveTurnover(rows, rawQuotes), val(activeR), day);
       writes.push(['SET', 'active:last', active.next]);
       if (active.items.length) alerts.push({ screen: ACTIVE_SCREEN, detail: `New in the top ${ACTIVE_TOP} by value traded today`, items: active.items });
+
+      if (rawQuotes) {
+        const gain = diffTop(volumeGainers(rows, rawQuotes), val(volR), day);
+        writes.push(['SET', 'volgain:last', gain.next]);
+        if (gain.items.length) alerts.push({ screen: VOLGAIN_SCREEN, detail: `New in the top ${ACTIVE_TOP} by volume vs 20-day average (at least ${VOLGAIN_MIN}x)`, items: gain.items });
+      }
 
       const lastMap = pairsToObject(val(lastR));
       let { alerts: screenAlerts, nextLast } = diffScreens(rows, screens, lastMap);

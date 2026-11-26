@@ -639,21 +639,10 @@ test('watch + scan: baseline, new match alert, no repeat, edited screen re-basel
   const s1 = await scan();
   assert.equal(s1.status, 200);
   assert.equal(s1.json.alerts, 0, 'first scan only sets the baseline');
+  assert.equal(s1.json.screens, 1, 'the scanner runs the fixed Pullback screen only');
   ltp = 100;
   const s2 = await scan();
-  assert.equal(s2.json.sent, 1, 'Other matches too but is not a Pullback screen: not sent');
-  assert.deepEqual(telegrams.at(-1).split('\n').slice(0, 3), ['📡 Pullback Cheap', 'LTP < 150', `• ${sym} ₹100.00`]);
-  assert.equal(up.hashes.get(`alert:count:${telegramLib.istDay()}`)?.get('Pullback Cheap'), '1', 'counted for the day summary');
-  const s3 = await scan();
-  assert.equal(s3.json.sent, 0, 'still matching: no repeat');
-
-  // leaves and comes back the same day: the shared Redis dedupe holds it back
-  ltp = 200; await scan(); ltp = 100;
-  assert.equal((await scan()).json.sent, 0);
-
-  // editing the watched screen re-baselines instead of alerting
-  await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'add', name: 'Pullback Cheap', conditions: [{ field: 'ltp', op: '<', value: '120' }] } });
-  assert.equal((await scan()).json.alerts, 0);
+  assert.equal(s2.json.sent, 0, 'watched screens from Lens no longer send alerts');
 
   const list = await run(lensApi, { headers: auth0 });
   assert.equal(list.json.configured, true);
@@ -662,7 +651,7 @@ test('watch + scan: baseline, new match alert, no repeat, edited screen re-basel
   await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Renamed' } });
   const rm = await run(lensApi, { method: 'POST', headers: auth0, body: { action: 'remove', name: 'Pullback Cheap' } });
   assert.equal(rm.json.screens.length, 0);
-  assert.equal(telegrams.filter((t) => t.startsWith('📡')).length, 1, 'one alert; anything else is an owner warning');
+  assert.equal(telegrams.filter((t) => t.startsWith('📡')).length, 0, 'no alert from a watched screen');
 
   delete process.env.UPSTASH_REDIS_REST_URL;
   delete process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -864,4 +853,19 @@ test('Most Active Future Contracts: value = price x quantity, top 15, new entry 
   const moved = scanLib.diffTop(scanLib.futuresList(futs), base.next, day);
   assert.deepEqual(moved.items.map((i) => i.s), ['N15 FUT']);
   assert.equal(scanLib.futuresList({ X: { futLive: 0, futVolLive: 5 } })[0].value, 0);
+});
+
+test('Volume Gainers: live volume vs 20-day average, at least 2x, new entry alerts', () => {
+  const rows = [
+    { s: 'A', ltp: 10, chg: 1, avgVol20: 1000 },
+    { s: 'B', ltp: 20, chg: 2, avgVol20: 1000 },
+    { s: 'C', ltp: 30, chg: 3, avgVol20: 0 },
+  ];
+  const list = scanLib.volumeGainers(rows, { A: { vol: 3500 }, B: { vol: 1500 }, C: { vol: 9000 } });
+  assert.deepEqual(list.map((x) => x.value), [3.5, 0, 0], 'B is under 2x, C has no average');
+  const day = '2026-11-26';
+  const base = scanLib.diffTop(list, null, day);
+  assert.equal(base.items.length, 0);
+  const next = scanLib.diffTop(scanLib.volumeGainers(rows, { A: { vol: 3500 }, B: { vol: 2500 } }), base.next, day);
+  assert.deepEqual(next.items.map((i) => i.s), ['B']);
 });
