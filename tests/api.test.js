@@ -869,3 +869,12 @@ test('Volume Gainers: live volume vs 20-day average, at least 2x, new entry aler
   const next = scanLib.diffTop(scanLib.volumeGainers(rows, { A: { vol: 3500 }, B: { vol: 2500 } }), base.next, day);
   assert.deepEqual(next.items.map((i) => i.s), ['B']);
 });
+
+test('Pullback: first scan of a new day is the baseline, no burst of yesterday matches at the open', () => {
+  const sc = { name: 'P', sector: '', conditions: [{ field: 'ltp', op: '<', value: '150' }] };
+  const rows = [{ s: 'A', ltp: 100 }, { s: 'B', ltp: 120 }];
+  const y = scanLib.diffScreens([{ s: 'A', ltp: 100 }], [sc], {}, '2026-11-26').nextLast;
+  assert.equal(scanLib.diffScreens(rows, [sc], y, '2026-11-27').alerts.length, 0, 'new day: no alert');
+  const t = scanLib.diffScreens(rows, [sc], y, '2026-11-26');
+  assert.deepEqual(t.alerts[0].items.map((i) => i.s), ['B'], 'same day: new entry alerts');
+});

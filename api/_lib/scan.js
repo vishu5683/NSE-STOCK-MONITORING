@@ -59,7 +59,7 @@ export function buildRows(latest, live, intra, screener, fund) {
 }
 
 // Pure: which stocks are new on each screen. lastMap values are JSON strings from Redis.
-export function diffScreens(rows, screens, lastMap) {
+export function diffScreens(rows, screens, lastMap, day = istDay()) {
   const bySym = new Map(rows.map((r) => [r.s, r]));
   const alerts = [];
   const nextLast = {};
@@ -67,14 +67,15 @@ export function diffScreens(rows, screens, lastMap) {
     const list = sc.sector ? rows.filter((r) => (r.sector || r.sec) === sc.sector) : rows;
     const syms = runQuery(list, sc.conditions).map((r) => r.s);
     const key = screenKey(sc);
-    nextLast[sc.name] = JSON.stringify({ key, syms });
+    nextLast[sc.name] = JSON.stringify({ key, day, syms });
     let prev = null;
     try {
       prev = lastMap[sc.name] ? JSON.parse(lastMap[sc.name]) : null;
     } catch {
       prev = null;
     }
-    if (!prev || prev.key !== key) continue; // first run or edited screen: baseline only
+    // first scan of the day, first run or edited screen: baseline only, so the open does not resend yesterday's list
+    if (!prev || prev.key !== key || prev.day !== day) continue;
     const before = new Set(prev.syms);
     const added = syms.filter((s) => !before.has(s));
     if (added.length) {
@@ -252,7 +253,7 @@ export async function runScan(base, now = Date.now()) {
       }
 
       const lastMap = pairsToObject(val(lastR));
-      let { alerts: screenAlerts, nextLast } = diffScreens(rows, screens, lastMap);
+      let { alerts: screenAlerts, nextLast } = diffScreens(rows, screens, lastMap, day);
       const toTelegram = new Set(screens.filter(telegramScreen).map((sc) => sc.name));
       const candidates = [...new Set(screenAlerts.filter((a) => toTelegram.has(a.screen)).flatMap((a) => a.items.map((i) => i.s)))];
       if (candidates.length && summary.source === 'upstox') {
@@ -262,7 +263,7 @@ export async function runScan(base, now = Date.now()) {
             const held = new Set(gaps.map((g) => g.s));
             summary.held = held.size;
             rows = rows.filter((r) => !held.has(r.s));
-            ({ alerts: screenAlerts, nextLast } = diffScreens(rows, screens, lastMap));
+            ({ alerts: screenAlerts, nextLast } = diffScreens(rows, screens, lastMap, day));
             const lines = gaps.slice(0, 10).map((g) => `• ${g.s}: Upstox ${g.upstox} vs Yahoo ${g.yahoo} (${g.gap}%)`);
             await ownerOnce(`gap:${gaps.map((g) => g.s).sort().join(',')}`, `⚠️ Price check: alert held back, sources disagree by more than ${CROSS_CHECK_PCT}%\n${lines.join('\n')}`, now).catch(() => {});
           }
