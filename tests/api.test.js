@@ -878,3 +878,17 @@ test('Pullback: first scan of a new day is the baseline, no burst of yesterday m
   const t = scanLib.diffScreens(rows, [sc], y, '2026-11-26');
   assert.deepEqual(t.alerts[0].items.map((i) => i.s), ['B'], 'same day: new entry alerts');
 });
+
+test('Pullback top 15: ranked by value traded today, new entry alerts, held stock is not replaced', () => {
+  const day = '2026-11-27';
+  const sc = { name: 'P', sector: '', top: 15, conditions: [{ field: 'ltp', op: '>', value: '0' }] };
+  const row = (n) => ({ s: `S${n}`, ltp: 100, dayValueCr: n });
+  const rows = Array.from({ length: 17 }, (_, i) => row(i + 1));
+  const base = scanLib.diffScreens(rows, [sc], {}, day).nextLast;
+  assert.deepEqual(JSON.parse(base.P).syms.slice(0, 2), ['S17', 'S16']);
+  assert.equal(JSON.parse(base.P).syms.length, 15);
+  const jumped = [...rows.slice(1), row(30)];
+  const next = scanLib.diffScreens(jumped, [sc], base, day);
+  assert.deepEqual(next.alerts[0].items.map((i) => i.s), ['S30']);
+  assert.equal(scanLib.diffScreens(jumped, [sc], base, day, new Set(['S30'])).alerts.length, 0, 'held stock: nothing takes its place');
+});

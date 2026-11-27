@@ -46,7 +46,9 @@ const PULLBACK_QUERY = queryText(PRESETS.find((p) => isPullbackScreen(p.name))?.
 // The Pullback alert runs from this fixed screen, not from the Lens watch list, so editing or
 // removing a watched screen in the browser cannot stop it.
 const PULLBACK_PRESET = PRESETS.find((p) => isPullbackScreen(p.name));
-export const PULLBACK_SCREEN = { name: PULLBACK_PRESET.name, sector: '', conditions: PULLBACK_PRESET.conditions.map((c) => ({ field: c.field, op: c.op, value: String(c.value) })) };
+// Only the PULLBACK_TOP matches with the highest value traded today are alerted.
+export const PULLBACK_TOP = 15;
+export const PULLBACK_SCREEN = { name: PULLBACK_PRESET.name, sector: '', top: PULLBACK_TOP, conditions: PULLBACK_PRESET.conditions.map((c) => ({ field: c.field, op: c.op, value: String(c.value) })) };
 
 // A watched screen counts as Pullback by its name, or by the preset's query under any name.
 export const telegramScreen = (sc) => isPullbackScreen(sc.name) || (PULLBACK_QUERY !== '' && queryText(sc.conditions) === PULLBACK_QUERY);
@@ -59,14 +61,17 @@ export function buildRows(latest, live, intra, screener, fund) {
 }
 
 // Pure: which stocks are new on each screen. lastMap values are JSON strings from Redis.
-export function diffScreens(rows, screens, lastMap, day = istDay()) {
+// held symbols are left out without letting a lower-ranked stock take their place.
+export function diffScreens(rows, screens, lastMap, day = istDay(), held = new Set()) {
   const bySym = new Map(rows.map((r) => [r.s, r]));
   const alerts = [];
   const nextLast = {};
   for (const sc of screens) {
     const list = sc.sector ? rows.filter((r) => (r.sector || r.sec) === sc.sector) : rows;
-    const syms = runQuery(list, sc.conditions).map((r) => r.s);
-    const key = screenKey(sc);
+    let matches = runQuery(list, sc.conditions);
+    if (sc.top) matches = matches.filter((r) => turnoverNow(r) > 0).sort((a, b) => turnoverNow(b) - turnoverNow(a)).slice(0, sc.top);
+    const syms = matches.map((r) => r.s).filter((s) => !held.has(s));
+    const key = `${screenKey(sc)}${sc.top ? `|top${sc.top}` : ''}`;
     nextLast[sc.name] = JSON.stringify({ key, day, syms });
     let prev = null;
     try {
@@ -81,7 +86,7 @@ export function diffScreens(rows, screens, lastMap, day = istDay()) {
     if (added.length) {
       alerts.push({
         screen: sc.name,
-        detail: `${sc.sector ? `${sc.sector}: ` : ''}${queryText(sc.conditions)}`,
+        detail: sc.top ? `New in the top ${sc.top} Pullback stocks by value traded today` : `${sc.sector ? `${sc.sector}: ` : ''}${queryText(sc.conditions)}`,
         items: added.map((s) => ({ s, k: 'new', p: bySym.get(s)?.ltp ?? null, c: bySym.get(s)?.chg ?? null })),
       });
     }
@@ -242,7 +247,8 @@ export async function runScan(base, now = Date.now()) {
     if (latest) {
       let rows = buildRows(latest, live, intra, val(configR)?.screener || {}, val(fundR)?.stocks);
 
-      const active = diffActive(withLiveTurnover(rows, rawQuotes), val(activeR), day);
+      rows = withLiveTurnover(rows, rawQuotes);
+      const active = diffActive(rows, val(activeR), day);
       writes.push(['SET', 'active:last', active.next]);
       if (active.items.length) alerts.push({ screen: ACTIVE_SCREEN, detail: `New in the top ${ACTIVE_TOP} by value traded today`, items: active.items });
 
@@ -262,8 +268,7 @@ export async function runScan(base, now = Date.now()) {
           if (gaps.length) {
             const held = new Set(gaps.map((g) => g.s));
             summary.held = held.size;
-            rows = rows.filter((r) => !held.has(r.s));
-            ({ alerts: screenAlerts, nextLast } = diffScreens(rows, screens, lastMap, day));
+            ({ alerts: screenAlerts, nextLast } = diffScreens(rows, screens, lastMap, day, held));
             const lines = gaps.slice(0, 10).map((g) => `• ${g.s}: Upstox ${g.upstox} vs Yahoo ${g.yahoo} (${g.gap}%)`);
             await ownerOnce(`gap:${gaps.map((g) => g.s).sort().join(',')}`, `⚠️ Price check: alert held back, sources disagree by more than ${CROSS_CHECK_PCT}%\n${lines.join('\n')}`, now).catch(() => {});
           }
